@@ -30,7 +30,7 @@
   const app = document.getElementById('app');
   const ui = {
     overlay: null,       // { type: 'radial' | 'meal' | 'workout' | 'event' | 'day' | 'menu', ... }
-    weekStart: null,     // Monday of the week shown on the dashboard
+    dashMonth: null,     // { y, m } month shown in the dashboard calendar
     calMonth: null,      // { y, m } for the setup calendar
     usernameEdit: false,
     usernameTouched: false,
@@ -149,6 +149,8 @@
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17v.5"/>',
     card: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/>',
     briefcase: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M9 7V5h6v2M3 12h18"/>',
+    book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
+    home: '<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>',
   };
   function svg(name, extra) { return '<svg viewBox="0 0 24 24" aria-hidden="true"' + (extra || '') + '>' + I[name] + '</svg>'; }
   const PHASE_ICON = { menstrual: 'drop', follicular: 'sprout', ovulation: 'sun', luteal: 'moon' };
@@ -438,30 +440,49 @@
     // Planner card
     let planner;
     if (info) {
-      if (!ui.weekStart) ui.weekStart = mondayOf(t);
-      const week = store.select.week(ui.weekStart);
+      // Full month calendar: phase colours, today, this week highlighted, a dot on days with tasks.
+      const tp = parts(t);
+      if (!ui.dashMonth) ui.dashMonth = { y: tp.y, m: tp.m };
+      const { y, m } = ui.dashMonth;
+      const grid = store.select.monthGrid(y, m);
+      const taskDays = new Set(store.getState().logs.tasks.filter((k) => k.status !== 'done').map(P.taskDate));
+      const thisWeek = mondayOf(t);
       const seen = new Set();
-      const cells = week.map((d) => {
+      const cell = (d) => {
         const p = parts(d.date);
-        let cls = 'pt-day', desc;
-        if (d.isOvulationDay) { cls += ' pt-day-ovulation'; desc = 'ovulation day'; seen.add('fertile'); }
-        else if (d.isFertile) { cls += ' pt-day-fertile'; desc = 'fertile window'; seen.add('fertile'); }
-        else if (d.phase === 'menstrual') { cls += ' pt-day-period'; desc = 'period'; seen.add('menstrual'); }
-        else { cls += ' pt-day-' + d.phase; desc = d.phase + ' phase'; seen.add(d.phase); }
-        if (d.date === t) { cls = 'pt-day pt-day-today'; desc = 'today, ' + d.phase + ' day ' + d.cycleDay; seen.add('today'); }
-        return '<button class="' + cls + '" data-act="open" data-type="day" data-date="' + d.date + '" aria-label="' + p.d + ' ' + MONTHS[p.m - 1] + ', ' + desc + '">' + p.d + '</button>';
-      }).join('');
+        let cls = 'mday', desc;
+        if (!d.phase) desc = '';
+        else if (d.isOvulationDay) { cls += ' fertile'; desc = 'ovulation day'; }
+        else if (d.isFertile) { cls += ' fertile'; desc = 'fertile window'; }
+        else if (d.phase === 'menstrual') { cls += ' period'; desc = 'period'; }
+        else { cls += ' ' + d.phase; desc = d.phase + ' phase'; }
+        if (d.inMonth && d.phase) seen.add(d.isFertile || d.isOvulationDay ? 'fertile' : d.phase);
+        if (!d.inMonth) cls += ' out';
+        if (d.date === t) { cls += ' today'; desc = 'today, ' + desc; seen.add('today'); }
+        const task = taskDays.has(d.date);
+        return '<button class="' + cls + '" data-act="go" data-to="#/day/' + d.date + '" aria-label="' + p.d + ' ' + MONTHS[p.m - 1] + (desc ? ', ' + desc : '') + (task ? ', tasks planned' : '') + '"' + (d.date === t ? ' aria-current="date"' : '') + '>' +
+          p.d + (task ? '<i class="task-dot" aria-hidden="true"></i>' : '') + '</button>';
+      };
+      const rows = [];
+      for (let i = 0; i < grid.length; i += 7) {
+        const wk = grid.slice(i, i + 7);
+        rows.push('<div class="mrow' + (wk[0].date === thisWeek ? ' now' : '') + '">' + wk.map(cell).join('') + '</div>');
+      }
+      const onToday = y === tp.y && m === tp.m;
       const legend = [['menstrual', 'var(--period)', 'Period'], ['follicular', 'var(--follicular)', 'Follicular'], ['fertile', 'var(--ovulation)', 'Fertile'], ['luteal', 'var(--luteal)', 'Luteal'], ['today', 'var(--action)', 'Today']]
         .filter(([k]) => seen.has(k)).map(([, c, l]) => '<span><i style="background: ' + c + '"></i>' + l + '</span>').join('');
-      const ws = parts(ui.weekStart), we = parts(P.addDays(ui.weekStart, 6));
       const tok = P.PHASES[info.phase].token;
       planner = '<section class="pt-card" style="margin-top: 16px; border-radius: 24px" aria-label="Cycle planner">' +
         '<div style="display: flex; align-items: center; gap: 12px"><span class="ico" style="width: 40px; height: 40px; background: var(' + tok + '); color: var(--ink-on-fill); cursor: default">' + svg(PHASE_ICON[info.phase]) + '</span>' +
         '<div style="display: flex; flex-direction: column"><b style="font: 700 18px/24px var(--font-sans)">' + info.label + ', day ' + info.cycleDay + '</b><span class="t-cap">Focus: ' + esc(info.hints.focus.toLowerCase()) + '</span></div></div>' +
         '<p class="t-cap" style="margin-top: 12px">' + PHASE_STORY[info.phase] + (next ? ' Your next period is likely ' + fmtBetween(next.earliest, next.latest) + '.' : '') + '</p>' +
         (next && next.irregular ? '<p class="t-cap" style="margin-top: 8px; color: var(--period-ink)">' + esc(next.note) + '</p>' : '') +
-        '<div class="mon" style="margin: 8px 0 0"><button data-act="week" data-d="-7" aria-label="Previous week">' + svg('back') + '</button><b>' + ws.d + ' ' + monthName(ws.m, true) + ' to ' + we.d + ' ' + monthName(we.m, true) + '</b><button data-act="week" data-d="7" aria-label="Next week">' + svg('next') + '</button></div>' +
-        '<div class="week">' + ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => '<span class="pt-cal-dow">' + d + '</span>').join('') + cells + '</div>' +
+        '<div class="mcal" aria-label="Calendar for ' + monthName(m) + ' ' + y + '">' +
+        '<div class="mcal-head"><button class="ico" data-act="dash-month" data-d="-1" aria-label="Previous month">' + svg('back') + '</button>' +
+        '<button class="mcal-title" data-act="dash-month" data-d="0"' + (onToday ? ' disabled' : ' aria-label="' + monthName(m) + ' ' + y + ', back to today"') + '>' + monthName(m, true) + ' ' + y + '</button>' +
+        '<button class="ico" data-act="dash-month" data-d="1" aria-label="Next month">' + svg('next') + '</button></div>' +
+        '<div class="mrow dow">' + ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => '<span>' + d + '</span>').join('') + '</div>' +
+        rows.join('') + '</div>' +
         '<div class="pt-legend" style="margin-top: 12px">' + legend + '<span>Tap a day to plan</span></div>' +
         '<p class="t-cap" style="margin-top: 8px">' + esc(info.basis) + '. This is an estimate, not medical advice.</p></section>';
     } else {
@@ -586,6 +607,103 @@
       return dialog(INFO[0], false, INFO[1], INFO[2], '<button class="pt-btn pt-btn-primary block" data-act="close">Close</button>');
     }
     return '';
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Day timeline: opened by tapping a day in the dashboard calendar     */
+  /* ------------------------------------------------------------------ */
+
+  const TASK_LOOK = {
+    work: { icon: 'briefcase', color: 'var(--luteal)' },
+    study: { icon: 'book', color: 'var(--ovulation)' },
+    personal: { icon: 'user', color: 'var(--follicular)' },
+    home: { icon: 'home', color: 'var(--period)' },
+  };
+  const EFFORT_HEIGHT = { light: 56, medium: 76, deep: 100 }; // taller capsule, more effort
+
+  // done/total pill under a day in the week strip: green when most is done, amber halfway, red when little is.
+  function dayScorePill(tasks) {
+    if (!tasks.length) return '<span class="dscore empty"></span>';
+    const done = tasks.filter((k) => k.status === 'done').length;
+    const r = done / tasks.length;
+    const tone = r >= 0.7 ? 'good' : r >= 0.4 ? 'mid' : 'low';
+    return '<span class="dscore ' + tone + '" aria-hidden="true"><i style="width: ' + Math.round(r * 100) + '%"></i><b>' + done + '/' + tasks.length + '</b></span>';
+  }
+
+  function allDayCircle(fill, icon, label, attrs, strike) {
+    return '<' + (attrs ? 'button' : 'div') + ' class="aday"' + (attrs ? ' ' + attrs : '') + '><span class="dot" style="background: ' + fill + '">' + svg(icon) + '</span><span class="lab' + (strike ? ' strike' : '') + '">' + esc(label) + '</span></' + (attrs ? 'button' : 'div') + '>';
+  }
+
+  function dayScreen(date) {
+    const t = P.today(now());
+    const p = parts(date);
+    const ws = mondayOf(date);
+    const week = Array.from({ length: 7 }, (_, i) => P.addDays(ws, i));
+    const strip = week.map((d) => {
+      const dp = parts(d);
+      const cls = 'wday' + (d === date ? ' on' : '') + (d === t ? ' today' : '');
+      return '<button class="' + cls + '" data-act="go" data-to="#/day/' + d + '" aria-label="' + esc(fmtLong(d)) + (d === t ? ', today' : '') + '"' + (d === date ? ' aria-current="date"' : '') + '>' +
+        '<span class="dn">' + DAYS[dp.dow].slice(0, 3) + '</span><span class="dd">' + dp.d + '</span>' + dayScorePill(store.select.tasksOn(d)) + '</button>';
+    }).join('');
+
+    // All day: phase, period and fertile estimates, mood, and the day's food and logs.
+    const day = store.select.day(date);
+    const info = day.phase;
+    const next = store.select.nextPeriod();
+    const circles = [];
+    if (info) {
+      circles.push(allDayCircle('var(' + P.PHASES[info.phase].token + ')', PHASE_ICON[info.phase], info.label + ', day ' + info.cycleDay));
+      if (info.isOvulationDay) circles.push(allDayCircle('var(--ovulation)', 'sun', 'Likely ovulation'));
+      else if (info.isFertile) circles.push(allDayCircle('var(--ovulation)', 'sun', 'Fertile window'));
+      if (next && date >= next.earliest && date <= next.latest) circles.push(allDayCircle('var(--period)', 'drop', 'Period likely'));
+    }
+    const moods = day.moods.flatMap((m) => m.moods);
+    if (moods.length) circles.push(allDayCircle('var(--surface-300)', 'face', moods.slice(0, 2).map((m) => P.MOODS[m].label).join(', ')));
+    const logged = day.meals.length + day.workouts.length;
+    circles.push(allDayCircle('var(--surface-300)', 'fork', logged ? 'Food and logs, ' + logged : 'Food and logs', 'data-act="open" data-type="day" data-date="' + date + '"'));
+
+    // Timeline: the day's tasks in time order, with a Now marker on today.
+    const tasks = store.select.tasksOn(date);
+    const nowD = now();
+    const nowHHMM = String(nowD.getHours()).padStart(2, '0') + ':' + String(nowD.getMinutes()).padStart(2, '0');
+    const rows = [];
+    let nowPlaced = date !== t;
+    tasks.forEach((k) => {
+      const time = fmtTime(k.dueAt);
+      if (!nowPlaced && time > nowHHMM) { rows.push(nowRow(nowHHMM)); nowPlaced = true; }
+      const look = TASK_LOOK[k.type] || TASK_LOOK.work;
+      const done = k.status === 'done';
+      const missed = k.status === 'missed';
+      const meta = [LABELS.taskType[k.type], LABELS.effort[k.effort] + ' effort'].concat(k.source === 'assistant' ? ['added by assistant'] : []).join(' · ');
+      rows.push('<div class="tl-row' + (done ? ' done' : '') + (missed ? ' missed' : '') + '">' +
+        '<span class="tl-time">' + time + '</span>' +
+        '<span class="tl-pill" style="--c: ' + look.color + '; height: ' + EFFORT_HEIGHT[k.effort] + 'px">' + svg(look.icon) + '</span>' +
+        '<div class="tl-body"><span class="tl-when">' + time + (missed ? ' · missed' : '') + '</span><b>' + esc(k.title) + '</b><span class="t-cap">' + esc(meta) + '</span></div>' +
+        '<button class="tl-check' + (done ? ' on' : '') + '" data-act="task" data-id="' + k.id + '" aria-label="Mark ' + esc(k.title) + (done ? ' as not done' : ' as done') + '" style="--c: ' + look.color + '">' + (done ? svg('tick') : missed ? svg('close') : '') + '</button></div>');
+    });
+    if (!nowPlaced) rows.push(nowRow(nowHHMM));
+    const empty = !tasks.length;
+    const hint = info ? '<p class="tl-hint">' + svg('sprout') + '<span>' + esc(info.label) + ' days: ' + esc(info.hints.work.charAt(0).toLowerCase() + info.hints.work.slice(1)) + '.</span></p>' : '';
+
+    return '<div class="ph day-page">' +
+      '<div class="day-head"><button class="back" data-act="go" data-to="#/" aria-label="Back to the dashboard">' + svg('back') + '</button>' +
+      '<h1 class="day-title">' + MONTHS[p.m - 1] + ' <span>' + p.y + '</span></h1>' +
+      '<button class="ico" data-act="go" data-to="#/assistant" aria-label="Ask the assistant" style="width: 44px; height: 44px">' + svg('chat') + '</button></div>' +
+      '<div class="wstrip"><button class="ico wnav" data-act="go" data-to="#/day/' + P.addDays(date, -7) + '" aria-label="Previous week">' + svg('back') + '</button>' +
+      '<div class="wdays">' + strip + '</div>' +
+      '<button class="ico wnav" data-act="go" data-to="#/day/' + P.addDays(date, 7) + '" aria-label="Next week">' + svg('next') + '</button></div>' +
+      '<section class="day-sheet" aria-label="' + esc(fmtLong(date)) + '">' +
+      '<div class="adays">' + circles.join('') + '</div>' +
+      (empty ? '<div class="tl-empty"><b class="t-head">Nothing planned yet</b><span class="t-cap">Tap + to add a task for ' + esc(fmtLong(date)) + '.</span></div>' : '') +
+      '<div class="timeline">' + (empty ? (date === t ? nowRow(nowHHMM) : '') : rows.join('')) + '</div>' +
+      hint +
+      '<p class="t-cap" style="margin-top: 8px">Phases are estimates, not medical advice.</p></section>' +
+      '<button class="fab solo" data-act="new-task" data-date="' + date + '" aria-label="Add a task on ' + esc(fmtLong(date)) + '">' + svg('plus') + '</button>' +
+      '</div>';
+  }
+
+  function nowRow(hhmm) {
+    return '<div class="tl-now" aria-label="Now, ' + hhmm + '"><span class="tl-time">' + hhmm + '</span><span class="tl-now-line"></span></div>';
   }
 
   /* ------------------------------------------------------------------ */
@@ -1704,6 +1822,8 @@
     if (workout) return { name: workout };
     if (h === '#/assistant' || h === '#/tab/assistant') return { name: 'assistant' };
     if (h === '#/pro') return { name: 'tab', tab: 'pro' };
+    const dayRoute = h.match(/^#\/day\/(\d{4}-\d{2}-\d{2})$/);
+    if (dayRoute && P.isISODate(dayRoute[1])) return { name: 'day', date: dayRoute[1] };
     if (h === '#/goals') return { name: 'goals' };
     if (h === '#/goals/new') return { name: 'new-task' };
     if (h === '#/goals/productivity') return { name: 'trends' };
@@ -1721,7 +1841,7 @@
     const focusKey = active && active.dataset ? (active.id ? '#' + active.id : active.dataset.act ? focusSelector(active) : null) : null;
     const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
 
-    const screens = { setup: () => SETUP[r.step](), mood: moodScreen, moodHistory, tab: () => placeholder(r.tab), goals: planner, 'new-task': newTaskScreen, trends: trendsScreen, home: dashboard,
+    const screens = { setup: () => SETUP[r.step](), mood: moodScreen, moodHistory, tab: () => placeholder(r.tab), goals: planner, day: () => dayScreen(r.date), 'new-task': newTaskScreen, trends: trendsScreen, home: dashboard,
       workout: workoutHome, weights: weightsScreen, gym: () => listScreen('gym'), bodyweight: () => listScreen('bodyweight'), mat: pilatesYogaScreen, run: runScreen,
       assistant: assistantScreen, setupChat: setupChatScreen, settings: settingsScreen, mode: modeScreen, subscription: subscriptionScreen, notifications: notificationsScreen, privacy: privacyScreen, welcome: welcomeBack };
     let html = screens[r.name]();
@@ -1915,7 +2035,7 @@
 
     // planner
     'new-task': (d) => {
-      ui.newTask = { title: '', date: d.date || (location.hash === '#/goals' && ui.goalsDate) || P.today(now()), time: '09:00', type: 'work', effort: 'medium', note: '' };
+      ui.newTask = { title: '', date: d.date || (location.hash === '#/goals' && ui.goalsDate) || P.today(now()), time: '09:00', type: 'work', effort: 'medium', note: '', back: location.hash.startsWith('#/day/') ? location.hash : null };
       go('#/goals/new');
     },
     'nt-set': (d) => { ui.newTask[d.field] = d.value; render(); },
@@ -1936,6 +2056,7 @@
         ui.keepOverlay = true;
       } else {
         toast('Task added');
+        if (n.back) { go('#/day/' + n.date); return; }
       }
       go('#/goals');
     },
@@ -1992,7 +2113,15 @@
     },
 
     // dashboard
-    week: (d) => { ui.weekStart = P.addDays(ui.weekStart, Number(d.d)); render(); },
+    'dash-month': (d) => {
+      const n = Number(d.d);
+      if (n === 0) { const tp = parts(P.today(now())); ui.dashMonth = { y: tp.y, m: tp.m }; render(); return; }
+      let { y, m } = ui.dashMonth;
+      m += n;
+      if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+      ui.dashMonth = { y, m };
+      render();
+    },
     task: (d) => {
       const task = store.getState().logs.tasks.find((k) => k.id === d.id);
       if (!task) return;
@@ -2030,7 +2159,7 @@
       store.actions.deleteAllData();
       try { localStorage.removeItem(FIRED_KEY); } catch (e) { /* ignore */ }
       ui.overlay = null;
-      ui.weekStart = null;
+      ui.dashMonth = null;
       ui.calMonth = null;
       ui.usernameTouched = false;
       go('#/setup/1');

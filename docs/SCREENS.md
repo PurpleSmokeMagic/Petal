@@ -5,7 +5,8 @@ The code refers to screens by short codes from the design mockups. Routes are ha
 | Code | Screen | Route |
 |---|---|---|
 | F2 to F8 | Onboarding, 7 steps: name, cycle baseline, how periods feel, body and goal, diet, daily activity, life (occupation) | `#/setup/1` to `#/setup/7` |
-| F9 | Dashboard | `#/` |
+| F9 | Dashboard: phase card with a month calendar, quick actions, calories at the bottom | `#/` |
+| | Day timeline: week strip, all day circles, tasks in time order, Now marker | `#/day/YYYY-MM-DD` |
 | F10 | Meal menu | overlay on the dashboard |
 | F11 | Day detail | overlay on the dashboard |
 | F12 | Mood log | `#/mood`, `#/mood/new` |
