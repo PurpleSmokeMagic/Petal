@@ -468,7 +468,7 @@
       planner = '<section class="pt-card" style="margin-top: 16px"><b class="t-head">Add your last period to see your phase</b><p class="t-cap" style="margin-top: 4px">We need one date to place you in your cycle.</p><button class="pt-btn pt-btn-secondary" data-act="go" data-to="#/setup/2" style="margin-top: 12px">Add date</button></section>';
     }
 
-    return '<div class="ph has-tabs">' + header() +
+    return '<div class="ph has-tabs' + (radial ? ' radial-open' : '') + '">' + header() +
       // Phase and week first, quick actions, then calories and macros at the bottom.
       planner +
       '<div class="qcircles" style="margin-top: 16px">' +
@@ -1774,6 +1774,11 @@
     open: (d) => {
       ui.overlay = { type: d.type, date: d.date || null, meal: d.meal || null, topic: d.topic || null, justOpened: d.type !== 'radial' };
       render();
+      // The calorie card sits at the bottom of the dashboard, so bring it up to give the meal menu room.
+      if (d.type === 'radial') {
+        const hero = app.querySelector('.hero');
+        if (hero) hero.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      }
     },
 
     // assistant

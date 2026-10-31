@@ -85,6 +85,8 @@ button.wtype { color: inherit; font: inherit; }
 .tip-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: calc(min(430px, 100vw) - 32px); max-width: none; bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 12; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-float); border-radius: 24px; border-bottom-left-radius: 8px; }
 @media (prefers-reduced-motion: no-preference) { .tip-bubble { animation: tip-in 240ms ease-out; } }
 @keyframes tip-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/* The calorie card is last on the dashboard: extra room below it lets the meal menu open fully above the tab bar. */
+.ph.has-tabs.radial-open { padding-bottom: calc(340px + env(safe-area-inset-bottom)); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   .sheet { animation: sheet-up 240ms ease-out; }
