@@ -493,6 +493,7 @@
     const o = ui.overlay;
     if (!o || o.type === 'radial') return '';
     if (o.type === 'chat-options') return chatOptionsSheet();
+    if (o.type === 'ai-notice') return aiNoticeSheet();
     const t = P.today(now());
 
     if (o.type === 'day') {
@@ -1265,7 +1266,8 @@
     return '<div class="ph">' + subPage('Privacy settings', '#/settings', 'Choose what your assistant can use. You can change this any time.') +
       '<div class="sec" style="gap: 12px; margin-top: 24px">' + rows.map(([k, icon, title, sub]) => switchCard('c-' + k, icon, title, sub, a[k], 'data-act="consent" data-field="' + k + '"')).join('') +
       '<p class="t-cap">Every assistant answer shows which of these it used. Cycle day and phase are always shared, because the assistant cannot plan without them. Your name is never shared.</p>' +
-      '<p class="t-cap">The assistant runs online. After you agree, Petal sends these to Groq, an AI service in the United States, only to answer you. Petal does not store your chats.</p>' +
+      '<p class="t-cap">The assistant runs online. After you agree, Petal sends these to an external AI provider in the United States, only to answer you. Petal does not store your chats.</p>' +
+      '<button class="linkbtn" data-act="open" data-type="ai-notice" style="align-self: flex-start; padding: 0">How your data is used</button>' +
       (store.getState().settings.assistant.consent ? '<button class="linkbtn" data-act="agent-withdraw" style="align-self: flex-start; padding: 0">Stop using the assistant</button>' : '') +
       '<p class="t-cap">Your cycle data is never used to show ads. Export or delete everything from Settings, one tap each.</p></div></div>';
   }
@@ -1449,9 +1451,10 @@
     }
     if (!store.getState().settings.assistant.consent) {
       return card('<b class="t-head">Before we chat</b>' +
-        '<span class="t-sub" style="margin: 0">Petal\'s assistant runs online. To answer you, Petal sends Groq, an AI service in the United States, ' +
-        (mode === 'setup' ? 'what you type here, including your name, and which setup questions are already answered.' : 'your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent.') +
-        ' Petal does not store your chats.</span>' +
+        '<span class="t-sub" style="margin: 0">Petal\'s assistant runs online. To answer you, Petal sends ' +
+        (mode === 'setup' ? 'what you type here, including your name, and which setup questions are already answered' : 'your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent. This goes') +
+        ' to an external AI provider that processes it for Petal on servers in the United States, only to answer you. Petal does not store your chats.</span>' +
+        '<button class="linkbtn" data-act="open" data-type="ai-notice" style="align-self: flex-start; padding: 0">How your data is used</button>' +
         '<span class="t-cap">' + (mode === 'setup' ? 'You can switch to the forms at any time.' : 'You can stop any time in chat options or Privacy settings.') + '</span>' +
         '<button class="pt-btn pt-btn-primary" data-act="agent-agree" style="align-self: flex-start">Agree and continue</button>' +
         (mode === 'setup' ? '<button class="linkbtn" data-act="go" data-to="#/setup/1" style="align-self: flex-start; padding: 0">Use the forms instead</button>' : ''));
@@ -1494,6 +1497,24 @@
     return '<div class="ph chat-page no-tabs">' + top +
       '<div class="chat" style="margin-top: 16px" aria-live="polite">' + chat.threads.setup.map(chatBubble).join('') + '</div>' +
       chatDock('Type your answer', null) + '</div>';
+  }
+
+  // Layered privacy notice for the assistant: the consent card gives the short version, this the full one.
+  // Names the kind of recipient and the country rather than the provider, as data protection law allows.
+  const AI_NOTICE = [
+    ['Who processes it', 'An external AI provider generates the answers on Petal\'s behalf. It may only use your data to answer you.'],
+    ['What is sent', 'Your message and earlier messages in the same chat, your cycle day, phase and period dates, and only the categories you turn on in Privacy settings. Your name, username and ids are never sent, unless you type your name while setting up by chat.'],
+    ['Where', 'The provider\'s servers are in the United States, so your data leaves your country to be processed.'],
+    ['Why, and on what basis', 'Only to answer you and to suggest changes that you choose to save. Because this is health data, Petal asks for your explicit consent first.'],
+    ['How long', 'Petal does not store your chats. They disappear when you reload. The provider may keep requests for a limited time under its own terms, for example to prevent abuse.'],
+    ['Never', 'Your data is never sold and never used for ads.'],
+    ['Your choices', 'You can stop any time in chat options or Privacy settings, and the assistant asks again before the next chat. Petal works fully without the assistant. You can export or delete all your data in Settings.'],
+  ];
+  function aiNoticeSheet() {
+    return '<div class="scrim" data-act="close"></div><section class="sheet" role="dialog" aria-modal="true" aria-label="How your data is used"><div class="handle"></div>' + sheetHead('How your data is used') +
+      '<div style="display: flex; flex-direction: column; gap: 14px; margin-top: 8px">' +
+      AI_NOTICE.map(([h, t]) => '<div style="display: flex; flex-direction: column; gap: 4px"><b class="field-label">' + h + '</b><span class="t-cap" style="font-size: 14px; line-height: 20px">' + t + '</span></div>').join('') +
+      '<button type="button" class="pt-btn pt-btn-primary block" data-act="close" style="margin-top: 8px">Close</button></div></section>';
   }
 
   function chatOptionsSheet() {
@@ -1635,7 +1656,7 @@
       workout: workoutHome, weights: weightsScreen, gym: () => listScreen('gym'), bodyweight: () => listScreen('bodyweight'), mat: pilatesYogaScreen, run: runScreen,
       assistant: assistantScreen, setupChat: setupChatScreen, settings: settingsScreen, mode: modeScreen, subscription: subscriptionScreen, notifications: notificationsScreen, privacy: privacyScreen, welcome: welcomeBack };
     let html = screens[r.name]();
-    if (r.name !== 'setup' && r.name !== 'setupChat' && r.name !== 'welcome') html += overlay();
+    if (r.name !== 'setup' && r.name !== 'welcome') html += overlay();
     if (ui.toast) html += '<div class="toast app-toast" role="status">' + svg('tick') + esc(ui.toast) + '</div>';
     app.innerHTML = html;
 
