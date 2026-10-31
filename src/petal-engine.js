@@ -6,7 +6,7 @@
  *   2. Pasted inline into a single file HTML app ->  window.Petal
  *   3. require('./petal-engine.js') in Node      ->  module.exports (used by the tests)
  *
- * Rules follow docs/CYCLE_ENGINE.md and docs/DATA_MODEL.md from the handoff.
+ * Rules are documented in docs/CYCLE_ENGINE.md and docs/DATA_MODEL.md.
  * All dates are stored as local calendar dates in "YYYY-MM-DD" form. Derived values
  * (cycle day, phase, predictions, scores) are computed on read, never stored.
  */
@@ -23,7 +23,7 @@
   /* Enums and catalogs                                                  */
   /* ------------------------------------------------------------------ */
 
-  // `token` is the CSS custom property in design/tokens.css (fill, then ink for text).
+  // `token` is the CSS custom property in design/petal.css (fill, then ink for text).
   const PHASES = {
     menstrual: {
       key: 'menstrual', label: 'Menstrual', token: '--period', inkToken: '--period-ink',
@@ -225,7 +225,7 @@
         plan: 'free',            // 'free' | 'pro' (UI mirror only, the server decides)
         onboardingStep: 'profile',
         assistantCanUse: { mood: false, pain: false, diet: false, schedule: false },
-        assistant: { baseUrl: 'http://127.0.0.1:11434', model: '' }, // local model endpoint, loopback only
+        assistant: { provider: 'local', baseUrl: 'http://127.0.0.1:11434', model: '', hostedConsent: false }, // see ASSISTANT_DEFAULTS
         notifications: {
           enabled: false,                         // the person turned reminders on in Petal
           moodReminder: { on: false, time: '20:00' },
@@ -495,7 +495,7 @@
     };
   }
 
-  // Ring colour stops from CLAUDE.md: green, amber, orange, red.
+  // Calorie ring colour stops: green, amber, orange, red (docs/CYCLE_ENGINE.md, Nutrition).
   function ringColor(ratio) {
     if (ratio >= 1) return '#f26b6b';
     if (ratio >= 0.8) return '#f59e42';
@@ -595,7 +595,7 @@
   }
 
   /*
-   * Rule based check on a new task (frames P2 and P3). Returns data only, the UI writes the copy.
+   * Rule based check on a new task (screens P2 and P3 in docs/SCREENS.md). Returns data only, the UI writes the copy.
    *   peak:    due within a day of ovulation
    *   caution: deep focus work due in the menstrual or luteal phase; suggests the second day
    *            of the next follicular phase
@@ -766,8 +766,9 @@
   /* Assistant: context, tools and validation (no network here)          */
   /* ------------------------------------------------------------------ */
 
-  // Only loopback endpoints: the model runs on this device, so health data never leaves it.
-  const ASSISTANT_DEFAULTS = { baseUrl: 'http://127.0.0.1:11434', model: '' };
+  // Local endpoints must be loopback, so a tampered setting cannot send health data to another host.
+  // provider 'hosted' means Petal's server function (Groq). It is used only with hostedConsent true.
+  const ASSISTANT_DEFAULTS = { provider: 'local', baseUrl: 'http://127.0.0.1:11434', model: '', hostedConsent: false };
   function isLoopbackUrl(value) {
     let u;
     try { u = new URL(String(value)); } catch (e) { return false; }
@@ -778,7 +779,8 @@
     const out = Object.assign({}, ASSISTANT_DEFAULTS, a);
     out.baseUrl = isLoopbackUrl(out.baseUrl) ? new URL(out.baseUrl).origin : ASSISTANT_DEFAULTS.baseUrl;
     out.model = /^[\w.:\/-]{1,80}$/.test(out.model || '') ? out.model : '';
-    return { baseUrl: out.baseUrl, model: out.model };
+    const hostedConsent = out.hostedConsent === true;
+    return { provider: out.provider === 'hosted' && hostedConsent ? 'hosted' : 'local', baseUrl: out.baseUrl, model: out.model, hostedConsent };
   }
 
   /*

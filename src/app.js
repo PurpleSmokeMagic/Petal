@@ -1,11 +1,11 @@
 /*
- * Petal UI: renders the reference frames (F2 to F12) from live engine state.
+ * Petal UI: renders every screen from live engine state. Screen codes (F, P, W) are listed in docs/SCREENS.md.
  * Depends on window.Petal from petal-engine.js. Hash routes:
  *   #/setup/1 .. #/setup/7   onboarding (F2 to F8)
  *   #/                       dashboard (F9), meal menu (F10), day detail (F11)
  *   #/mood                   mood log (F12)
  *   #/assistant              assistant chat (F13), local model through src/assistant.js
- *   #/pro                    plans, not built yet
+ *   #/pro                    plans, not built yet (docs/ROADMAP.md)
  * Add ?today=2026-10-31 to the URL to pin the date (matches the mockups).
  */
 (function () {
@@ -1299,13 +1299,16 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Assistant (F13): a local model through PetalAssistant               */
+  /* Assistant (F13): a local model, or Petal's hosted one (Groq)        */
   /* ------------------------------------------------------------------ */
 
   const A = window.PetalAssistant;
   const chat = {
     conn: 'unknown',  // 'unknown' | 'checking' | 'offline' | 'ready'
     models: [],
+    hosted: { available: false, provider: '', model: '' }, // what /api/chat on this site reports
+    askConsent: false, // the person picked the online assistant and has not agreed yet
+    showLocal: false,  // show the local setup steps under the online offer
     thread: [],       // what the screen shows: { role: 'user' | 'ai', text, basis, tools, error }
     api: [],          // what the model sees (without the system prompt), memory only
     notes: [],        // confirmations to tell the model with the next message
@@ -1319,10 +1322,11 @@
     chat.conn = 'checking';
     render();
     const cfg = store.getState().settings.assistant;
-    const res = await A.status(cfg.baseUrl);
+    const [res, hosted] = await Promise.all([A.status(cfg.baseUrl), A.hostedStatus()]);
     chat.models = res.models;
-    chat.conn = res.ok ? 'ready' : 'offline';
-    if (res.ok && !res.models.includes(cfg.model)) {
+    chat.hosted = hosted;
+    chat.conn = res.ok || (cfg.provider === 'hosted' && hosted.available) ? 'ready' : 'offline';
+    if (res.ok && cfg.provider === 'local' && !res.models.includes(cfg.model)) {
       const pick = res.models.find((m) => PREFERRED_MODELS.test(m)) || res.models[0] || '';
       if (pick) { store.actions.updateAssistant({ model: pick }); return; }
     }
@@ -1398,24 +1402,36 @@
     }
     if (chat.conn === 'unknown') setTimeout(checkConnection, 0);
     const cfg = state.settings.assistant;
-    if (chat.conn !== 'ready' || !cfg.model) {
+    const hosted = cfg.provider === 'hosted';
+    if (chat.askConsent || chat.conn !== 'ready' || (!hosted && !cfg.model)) {
       const checking = chat.conn === 'checking' || chat.conn === 'unknown';
+      const card = (inner) => '<div class="ph has-tabs">' + top + '<div class="pt-card" style="margin-top: 24px; padding: 20px; border-radius: 24px; display: flex; flex-direction: column; gap: 10px">' + inner + '</div>' + tabs('assistant') + '</div>';
+      if (checking && !chat.askConsent) return card('<b class="t-head">Looking for an assistant</b>');
+      const localSteps = (chat.conn === 'ready' ? '' : '<li>Install Ollama from ollama.com and open it.</li>') +
+        '<li>In a terminal, run <code>ollama pull llama3.2</code>.</li>' +
+        (hostedOrigin() ? '<li>Let Ollama accept this site: set <code>OLLAMA_ORIGINS</code> to <code>' + esc(hostedOrigin()) + '</code>, then quit and reopen Ollama.</li>' : '') +
+        '<li>Come back and tap Try again.</li>';
+      // Online offer, shown when this site has the hosted assistant set up. Nothing leaves the device before Agree.
+      if (chat.hosted.available && (chat.askConsent || chat.conn !== 'ready')) {
+        return card('<b class="t-head">Use the online assistant</b>' +
+          '<span class="t-sub" style="margin: 0">To answer you, Petal sends ' + esc(chat.hosted.provider || 'Groq') + ', an AI service in the United States, your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent, and Petal does not store your chats.</span>' +
+          '<span class="t-cap">You can stop any time in chat options. To keep everything on this computer, use a local model instead.</span>' +
+          '<button class="pt-btn pt-btn-primary" data-act="hosted-agree" style="align-self: flex-start">Agree and continue</button>' +
+          (chat.showLocal
+            ? '<ol class="t-sub" style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">' + localSteps + '</ol><button class="pt-btn pt-btn-secondary" data-act="chat-retry" style="align-self: flex-start">Try again</button>'
+            : '<button class="linkbtn" data-act="show-local" style="align-self: flex-start; padding: 0">Use a model on this computer</button>'));
+      }
       const noModels = chat.conn === 'ready';
-      return '<div class="ph has-tabs">' + top + '<div class="pt-card" style="margin-top: 24px; padding: 20px; border-radius: 24px; display: flex; flex-direction: column; gap: 10px">' +
-        '<b class="t-head">' + (checking ? 'Looking for a model on this device' : noModels ? 'No model installed yet' : 'Connect a model on this device') + '</b>' +
+      return card('<b class="t-head">' + (noModels ? 'No model installed yet' : 'Connect a model on this device') + '</b>' +
         '<span class="t-sub" style="margin: 0">Petal runs the assistant with a free model on your own computer, so your cycle data never leaves it.</span>' +
-        (checking ? '' : '<ol class="t-sub" style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">' +
-          (noModels ? '' : '<li>Install Ollama from ollama.com and open it.</li>') +
-          '<li>In a terminal, run <code>ollama pull llama3.2</code>.</li>' +
-          (hostedOrigin() ? '<li>Let Ollama accept this site: set <code>OLLAMA_ORIGINS</code> to <code>' + esc(hostedOrigin()) + '</code>, then quit and reopen Ollama.</li>' : '') +
-          '<li>Come back and tap Try again.</li></ol>' +
-          '<span class="t-cap">Looking at ' + esc(cfg.baseUrl) + '. You can change this in chat options.</span>' +
-          '<button class="pt-btn pt-btn-primary" data-act="chat-retry" style="align-self: flex-start">Try again</button>') + '</div>' + tabs('assistant') + '</div>';
+        '<ol class="t-sub" style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">' + localSteps + '</ol>' +
+        '<span class="t-cap">Looking at ' + esc(cfg.baseUrl) + '. You can change this in chat options.</span>' +
+        '<button class="pt-btn pt-btn-primary" data-act="chat-retry" style="align-self: flex-start">Try again</button>');
     }
     const ctx = P.buildAssistantContext(state, P.today(now()));
     const chips = contextChips(state, ctx).map((c) => '<span class="chip chip-line">' + esc(c) + '</span>').join('');
     const intro = chat.thread.length ? '' : '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 8px"><span>Ask me about food, training or planning around your cycle. I can also add tasks or log a mood once you confirm.</span>' +
-      '<span class="pt-src">Sharing: cycle day and phase' + (Object.keys(state.settings.assistantCanUse).filter((k) => state.settings.assistantCanUse[k]).map((k) => ', ' + { mood: 'moods', pain: 'pain', diet: 'diet', schedule: 'schedule' }[k]).join('')) + '.</span>' +
+      '<span class="pt-src">Sharing' + (hosted ? ' with ' + esc(chat.hosted.provider || 'Groq') : '') + ': cycle day and phase' + (Object.keys(state.settings.assistantCanUse).filter((k) => state.settings.assistantCanUse[k]).map((k) => ', ' + { mood: 'moods', pain: 'pain', diet: 'diet', schedule: 'schedule' }[k]).join('')) + '.</span>' +
       '<button class="linkbtn" data-act="go" data-to="#/settings/privacy" style="align-self: flex-start; padding: 0">Choose what I can use</button></div>';
     return '<div class="ph has-tabs chat-page">' + top +
       '<div class="chips" style="margin-top: 16px; gap: 6px">' + chips + '</div>' +
@@ -1429,17 +1445,23 @@
   function chatOptionsSheet() {
     const cfg = store.getState().settings.assistant;
     const models = chat.models.length ? chat.models : cfg.model ? [cfg.model] : [];
+    const hosted = cfg.provider === 'hosted';
+    const name = esc(chat.hosted.provider || 'Groq');
+    const providerField = chat.hosted.available || hosted
+      ? '<div class="field"><label for="co-provider">Assistant runs</label><select id="co-provider" name="provider" class="inp">' +
+        '<option value="local"' + (hosted ? '' : ' selected') + '>On this computer</option><option value="hosted"' + (hosted ? ' selected' : '') + '>Online with ' + name + '</option></select></div>'
+      : '';
     return '<div class="scrim" data-act="close"></div><section class="sheet" role="dialog" aria-modal="true" aria-label="Chat options"><div class="handle"></div>' + sheetHead('Chat options') +
-      '<form data-form="assistant" style="display: flex; flex-direction: column; gap: 12px">' +
-      '<div class="field"><label for="co-model">Model</label>' + (models.length
+      '<form data-form="assistant" style="display: flex; flex-direction: column; gap: 12px">' + providerField +
+      (hosted ? '<p class="t-cap">Messages go to ' + name + ' through Petal\'s server, with only the data you allow in Privacy settings. Choose On this computer to stop.</p>' : '<div class="field"><label for="co-model">Model</label>' + (models.length
         ? '<select id="co-model" name="model" class="inp">' + models.map((m) => '<option value="' + esc(m) + '"' + (m === cfg.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select>'
         : '<p class="t-cap">No models found yet.</p>') + '</div>' +
       '<div class="field"><label for="co-url">Model server on this device</label><input id="co-url" name="baseUrl" class="inp" value="' + esc(cfg.baseUrl) + '" inputmode="url" autocomplete="off" spellcheck="false">' +
-      '<p class="t-cap">Only addresses on this computer work, such as http://127.0.0.1:11434 for Ollama or http://127.0.0.1:1234 for LM Studio.</p></div>' +
+      '<p class="t-cap">Only addresses on this computer work, such as http://127.0.0.1:11434 for Ollama or http://127.0.0.1:1234 for LM Studio.</p></div>') +
       '<p class="t-cap" id="err" role="alert" style="color: var(--period-ink)"></p>' +
       '<button type="submit" class="pt-btn pt-btn-primary block">Save</button>' +
       '<button type="button" class="pt-btn pt-btn-text block" data-act="chat-clear">Clear chat</button>' +
-      '<p class="t-cap">Chats stay in this tab only and clear when you reload. Nothing is sent anywhere except the model on this device.</p></form></section>';
+      '<p class="t-cap">Chats stay in this tab only and clear when you reload. ' + (hosted ? 'Petal does not store them.' : 'Nothing is sent anywhere except the model on this device.') + '</p></form></section>';
   }
 
   // One user turn: send, run read only tools, stop at the first proposal that needs a person.
@@ -1464,8 +1486,11 @@
         while (history.length && history[0].role !== 'user') history = history.slice(1);
         const prefix = reply.text ? reply.text + '\n\n' : '';
         const res = await A.chat({
-          baseUrl: cfg.baseUrl, model: cfg.model, tools: P.ASSISTANT_TOOLS, signal: chat.abort.signal,
-          messages: [{ role: 'system', content: P.buildSystemPrompt(ctx) }].concat(history),
+          signal: chat.abort.signal,
+          ...(cfg.provider === 'hosted'
+            // The server builds the system prompt and tools itself and caps each message at 2000 characters.
+            ? { hosted: true, context: ctx.text, messages: history.map((m) => Object.assign({}, m, { content: String(m.content || '').slice(0, 2000) })) }
+            : { baseUrl: cfg.baseUrl, model: cfg.model, tools: P.ASSISTANT_TOOLS, messages: [{ role: 'system', content: P.buildSystemPrompt(ctx) }].concat(history) }),
           onToken: (t) => { reply.text = prefix + t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = reply.text; },
         });
         reply.text = prefix + res.content;
@@ -1492,8 +1517,12 @@
       const stopped = e && e.name === 'AbortError';
       if (stopped && reply.text) reply.text += ' …';
       else reply.error = stopped ? 'Stopped. The model took too long or you stopped it.'
-        : e && e.status === 404 ? 'The model ' + cfg.model + ' is not installed. Pick another one in chat options.'
-          : 'I could not reach the model on this device. Check that Ollama is open, then try again.';
+        : cfg.provider === 'hosted'
+          ? (e && e.status === 429 ? 'The online assistant is busy. Wait a minute, then try again.'
+            : e && e.status === 503 ? 'The online assistant is not set up on this site yet.'
+              : 'I could not reach the online assistant. Check your connection, then try again.')
+          : e && e.status === 404 ? 'The model ' + cfg.model + ' is not installed. Pick another one in chat options.'
+            : 'I could not reach the model on this device. Check that Ollama is open, then try again.';
     } finally {
       chat.busy = false;
       chat.abort = null;
@@ -1624,6 +1653,13 @@
 
     // assistant
     'chat-retry': () => checkConnection(),
+    'show-local': () => { chat.showLocal = true; render(); },
+    'hosted-agree': () => {
+      chat.askConsent = false;
+      store.actions.updateAssistant({ provider: 'hosted', hostedConsent: true });
+      chat.conn = 'ready';
+      render();
+    },
     'chat-suggest': (d) => { if (!chat.busy) runAssistant(d.value); },
     'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
     'chat-clear': () => { if (chat.abort) chat.abort.abort(); chat.thread = []; chat.api = []; chat.notes = []; ui.overlay = null; render(); },
@@ -1945,6 +1981,21 @@
       return;
     }
     if (kind === 'assistant') {
+      const cur = store.getState().settings.assistant;
+      if (f.provider === 'hosted' || (f.provider == null && cur.provider === 'hosted')) {
+        ui.overlay = null;
+        if (cur.hostedConsent) { store.actions.updateAssistant({ provider: 'hosted' }); toast('Saved'); } else { chat.askConsent = true; render(); }
+        return;
+      }
+      if (f.provider === 'local' && cur.provider === 'hosted') {
+        // Leaving online mode withdraws consent, so switching back asks again.
+        store.actions.updateAssistant({ provider: 'local', hostedConsent: false });
+        ui.overlay = null;
+        chat.conn = 'unknown';
+        render();
+        toast('Using a model on this computer');
+        return;
+      }
       if (!P.isLoopbackUrl(String(f.baseUrl || '').trim())) { showError('Use an address on this computer, such as http://127.0.0.1:11434.'); return; }
       const before = store.getState().settings.assistant.baseUrl;
       store.actions.updateAssistant({ baseUrl: String(f.baseUrl).trim(), model: f.model || store.getState().settings.assistant.model });

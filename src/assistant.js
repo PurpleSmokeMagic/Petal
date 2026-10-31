@@ -1,15 +1,21 @@
 /*
- * Petal assistant client: talks to a model running on this device through the
- * OpenAI compatible chat API that Ollama, LM Studio and llama.cpp all serve.
+ * Petal assistant client. Two ways to reach a model:
+ * - local:  a model on this device through the OpenAI compatible API that Ollama,
+ *           LM Studio and llama.cpp serve.
+ * - hosted: Petal's own server function (/api/chat), which holds the Groq key. Used only
+ *           after the person agrees in the app.
  *
  *   PetalAssistant.status(baseUrl)            -> { ok, models: [name], error }
+ *   PetalAssistant.hostedStatus()             -> { available, provider, model }
  *   PetalAssistant.chat({ baseUrl, model, messages, tools, signal, onToken })
+ *   PetalAssistant.chat({ hosted: true, context, messages, signal, onToken })
  *                                             -> { content, toolCalls: [{ id, name, arguments }] }
  *
  * Security notes (see SECURITY.md):
  * - Loopback endpoints only. The engine refuses any other host, and this file checks again
  *   before every request, so a tampered setting cannot send health data off the device.
- * - No API keys. Hosted models need a server function that holds the key (milestone 6).
+ * - No API keys in the browser. The hosted path posts to this site only (fixed path, same origin);
+ *   the server builds the system prompt and tool list itself.
  * - Responses are plain text to the caller. The UI escapes them before rendering.
  */
 (function (root, factory) {
@@ -44,6 +50,19 @@
     }
   }
 
+  // Is the hosted assistant set up on this deployment? A static server answers 404, which means no.
+  async function hostedStatus(signal) {
+    if (typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) return { available: false };
+    try {
+      const res = await fetch('/api/chat', { signal, credentials: 'omit', cache: 'no-store' });
+      if (!res.ok) return { available: false };
+      const data = await res.json();
+      return { available: data.available === true, provider: String(data.provider || ''), model: String(data.model || '') };
+    } catch (e) {
+      return { available: false };
+    }
+  }
+
   // Reads a server sent event stream and yields each JSON payload.
   async function* sse(res) {
     const reader = res.body.getReader();
@@ -65,19 +84,27 @@
     }
   }
 
-  async function chat({ baseUrl, model, messages, tools, signal, onToken }) {
+  async function chat({ hosted, context, baseUrl, model, messages, tools, signal, onToken }) {
     const ctrl = new AbortController();
     const stop = () => ctrl.abort();
     if (signal) signal.addEventListener('abort', stop, { once: true });
     const timer = setTimeout(stop, LIMITS.firstTokenMs);
     try {
-      const res = await fetch(endpoint(baseUrl, '/v1/chat/completions'), {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, tools, stream: true, max_tokens: LIMITS.maxTokens, temperature: 0.4 }),
-        signal: ctrl.signal,
-      });
+      const res = hosted
+        ? await fetch('/api/chat', {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context, messages }),
+          signal: ctrl.signal,
+        })
+        : await fetch(endpoint(baseUrl, '/v1/chat/completions'), {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, tools, stream: true, max_tokens: LIMITS.maxTokens, temperature: 0.4 }),
+          signal: ctrl.signal,
+        });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         const err = new Error('The model server answered ' + res.status + '.');
@@ -112,5 +139,5 @@
     }
   }
 
-  return { status, chat, LIMITS };
+  return { status, hostedStatus, chat, LIMITS };
 });

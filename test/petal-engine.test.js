@@ -326,7 +326,11 @@ test('assistant endpoint must be on this device', () => {
   for (const u of ['https://api.openai.com', 'http://127.0.0.1.evil.com', 'http://user:pw@127.0.0.1:11434', 'http://127.0.0.1:11434/proxy', 'file:///c:/x', 'javascript:alert(1)']) assert.equal(Petal.isLoopbackUrl(u), false, u);
   const store = Petal.createStore({ storage: { getItem: () => null, setItem() {}, removeItem() {} }, now: fixedNow });
   store.actions.updateAssistant({ baseUrl: 'https://api.example.com', model: 'llama3.2"><img>' });
-  assert.deepEqual(store.getState().settings.assistant, { baseUrl: 'http://127.0.0.1:11434', model: '' });
+  assert.deepEqual(store.getState().settings.assistant, { provider: 'local', baseUrl: 'http://127.0.0.1:11434', model: '', hostedConsent: false });
+  store.actions.updateAssistant({ provider: 'hosted' });
+  assert.equal(store.getState().settings.assistant.provider, 'local', 'hosted needs consent first');
+  store.actions.updateAssistant({ provider: 'hosted', hostedConsent: true });
+  assert.equal(store.getState().settings.assistant.provider, 'hosted');
 });
 
 test('csv export neutralises spreadsheet formulas', () => {
