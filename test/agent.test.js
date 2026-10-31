@@ -155,6 +155,14 @@ test('endpoint: rate limits a burst and hides model errors', async () => {
   assert.equal(codes[11], 429);
   stubGroq(401);
   const r = await call({ body: good(), ip: '5.5.5.5' });
-  assert.match(r.chunks.join(''), /"type":"error","code":"upstream"/);
-  assert.doesNotMatch(r.chunks.join(''), /gsk_secret|401/);
+  assert.match(r.chunks.join(''), /"type":"error","code":"upstream","status":401/);
+  assert.doesNotMatch(r.chunks.join(''), /gsk_secret/);
+});
+
+test('endpoint: passes the provider short error code, never its message', async () => {
+  process.env.GROQ_API_KEY = 'gsk_secret';
+  global.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { code: 'tool_use_failed', message: 'echo of the request: gsk_secret Why am I tired?' } }) });
+  const r = (await call({ body: good(), ip: '6.6.6.6' })).chunks.join('');
+  assert.match(r, /"status":400,"reason":"tool_use_failed"/);
+  assert.doesNotMatch(r, /echo|gsk_secret|tired/);
 });

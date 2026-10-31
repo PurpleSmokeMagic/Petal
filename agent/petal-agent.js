@@ -75,6 +75,8 @@ function createGroqLLM({ key, model, fetchImpl }) {
     if (!res.ok || !res.body) {
       const err = new Error('upstream ' + res.status);
       err.status = res.status;
+      // Keep only the provider's short error code (for example invalid_api_key), never its message text.
+      try { const c = (await res.json()).error.code; if (/^[a-z_]{1,40}$/.test(c)) err.reason = c; } catch (e) { /* no JSON body */ }
       throw err;
     }
     let content = '';

@@ -109,7 +109,10 @@ module.exports = async function handler(req, res) {
     send({ type: 'done' });
   } catch (e) {
     // Never pass Groq's error text on (it can echo the request).
-    if (!ctrl.signal.aborted) send({ type: 'error', code: e && e.status === 429 ? 'rate_limited' : 'upstream' });
+    // Never pass the provider's message text on (it can echo the request); its status and short code are safe.
+    if (!ctrl.signal.aborted) {
+      send({ type: 'error', code: e && e.status === 429 ? 'rate_limited' : 'upstream', status: e && e.status ? Number(e.status) : undefined, reason: e && e.reason });
+    }
   }
   res.end();
 };

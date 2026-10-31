@@ -2,7 +2,7 @@
 
 **A cycle-syncing planner for working women and students.** Petal plans tasks, workouts, meals and moods around the menstrual cycle, with its own AI agent that plans with you and can fill in your setup and logs, once you agree.
 
-**Live demo:** https://petal-swart-phi.vercel.app
+**Live demo:** https://petal-dz.vercel.app
 No install and no account. For judges, to see every feature: **Settings → Subscription → turn on "Preview Pro features"**.
 
 Built by **Lyna Cherif** for Thirduni Cohort 1, October 2026.
