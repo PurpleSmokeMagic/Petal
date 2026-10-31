@@ -2,7 +2,7 @@
  * Petal agent endpoint (Vercel server function). Holds the Groq key; the browser never sees it.
  *
  *   GET  /api/agent  -> { available: true | false }
- *   POST /api/agent  { mode, today, snapshot, messages } -> server sent events:
+ *   POST /api/agent  { mode, today, tzOffset, snapshot, messages } -> server sent events:
  *          data: { "type": "token", "text": "..." }      streamed answer text
  *          data: { "type": "action", "name", "args" }    a change for the person to Save
  *          data: { "type": "error", "code", "status", "reason" }   then the stream ends
@@ -61,9 +61,12 @@ module.exports = async function handler(req, res) {
   let state;
   try { state = P.migrate(P.safeParse(JSON.stringify(body.snapshot || {}))); } catch (e) { return S.json(res, 400, { error: 'snapshot' }); }
 
+  // Minutes ahead of UTC on the phone, from -14 to +14 hours. Anything else is ignored.
+  const tzOffset = Number.isInteger(body.tzOffset) && Math.abs(body.tzOffset) <= 840 ? body.tzOffset : undefined;
+
   await S.streamEvents(res, async (send, signal) => runAgent({
     llm: createGroqLLM({ key, model: await pickModel(key) }),
-    mode, today: body.today, state, setup: cleanSetup(body.snapshot && body.snapshot.setup), messages,
+    mode, today: body.today, tzOffset, state, setup: cleanSetup(body.snapshot && body.snapshot.setup), messages,
     onEvent: send, signal,
   }), pickModel.reset);
 };

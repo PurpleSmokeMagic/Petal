@@ -431,3 +431,63 @@ test('an imported "done" without the required answers restarts setup', () => {
   store.actions.importData({ settings: { onboardingStep: 'done' } });
   assert.equal(store.getState().settings.onboardingStep, 'profile');
 });
+
+test('date of birth gives the age; the agent snapshot gets the age in years, never the date', () => {
+  assert.equal(Petal.ageOn('1996-11-01', '2026-10-31'), 29);
+  assert.equal(Petal.ageOn('1996-10-31', '2026-10-31'), 30);
+  assert.equal(Petal.ageOn('2030-01-01', '2026-10-31'), null);
+  const s = Petal.migrate({ profile: { birthDate: '1996-10-31', heightCm: 165, weightKg: 60 }, cycle, settings: { assistantCanUse: { diet: true } } });
+  assert.equal(s.profile.birthDate, '1996-10-31');
+  const snap = Petal.assistantSnapshot(s, '2026-10-31', 'chat');
+  assert.equal(snap.profile.age, 30);
+  assert.equal(JSON.stringify(snap).includes('1996'), false);
+  assert.match(Petal.getCalorieTarget(s, fixedNow()).basis, /age and activity/);
+  assert.equal(Petal.migrate({ profile: { birthDate: '2024-01-01' } }).profile.birthDate, null, 'too young is dropped');
+  assert.equal(Petal.validateToolCall('update_profile', { birthDate: '1996-10-31' }, '2026-10-31').ok, true);
+  assert.equal(Petal.validateToolCall('update_profile', { birthDate: '31/10/1996' }, '2026-10-31').ok, false);
+});
+
+test('avatar: only a fixed colour or emoji, or a small JPEG made on the phone', () => {
+  const jpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+  assert.deepEqual(Petal.normalizeAvatar({ kind: 'photo', photo: jpeg, color: 'sky' }), { kind: 'photo', color: 'sky', emoji: Petal.AVATAR_EMOJIS[0], photo: jpeg });
+  assert.equal(Petal.normalizeAvatar({ kind: 'photo', photo: 'https://evil.example/x.jpg' }).kind, 'initial');
+  assert.equal(Petal.normalizeAvatar({ kind: 'photo', photo: 'data:image/svg+xml;base64,PHN2Zz4=' }).photo, '');
+  assert.equal(Petal.normalizeAvatar({ kind: 'emoji', emoji: '<img src=x>' }).emoji, Petal.AVATAR_EMOJIS[0]);
+  assert.equal(Petal.normalizeAvatar({ color: 'red;}' }).color, 'plum');
+  const s = Petal.migrate({ profile: { avatar: { kind: 'photo', photo: jpeg } }, cycle, settings: { assistantCanUse: { diet: true, schedule: true, mood: true, pain: true } } });
+  assert.equal(JSON.stringify(Petal.assistantSnapshot(s, '2026-10-31', 'chat')).includes('base64'), false, 'the avatar is never sent');
+});
+
+test('the agent can change, finish and remove existing entries, only by a real id', () => {
+  const clock = fixedNow();
+  const store = Petal.createStore({ storage: null, now: () => clock });
+  store.actions.updateCycle(cycle);
+  store.actions.updateConsent({ schedule: true, diet: true });
+  const task = store.actions.addTask({ title: 'Report', dueAt: new Date(2026, 10, 2, 9, 0), effort: 'deep' });
+  const meal = store.actions.logMeal({ date: '2026-10-31', meal: 'lunch', name: 'Soup', kcal: 400 });
+  const ctx = Petal.buildAssistantContext(store.getState(), '2026-10-31');
+  assert.ok(ctx.text.includes('[task ' + task.id + '] 2026-11-02 09:00 Report'));
+  assert.ok(ctx.text.includes('[meal ' + meal.id + ']'));
+
+  const v = Petal.validateToolCall('update_task', { id: task.id, date: '2026-11-05', time: '14:30' }, '2026-10-31');
+  assert.equal(v.ok, true);
+  assert.ok(Petal.findTarget('update_task', v.args, store.getState()));
+  assert.equal(Petal.findTarget('remove_task', { id: 'made-up' }, store.getState()), null);
+  assert.equal(Petal.validateToolCall('update_task', { id: task.id }, '2026-10-31').ok, false, 'nothing to change');
+  assert.equal(Petal.validateToolCall('remove_task', { id: 'a b"<' }, '2026-10-31').ok, false);
+  assert.equal(Petal.validateToolCall('remove_log', { kind: 'period', id: meal.id }, '2026-10-31').ok, false);
+  assert.ok(Petal.findTarget('remove_log', { kind: 'meal', id: meal.id }, store.getState()));
+
+  store.actions.editTask(task.id, { title: 'Final report', dueAt: new Date(2026, 10, 5, 14, 30) });
+  const t = store.getState().logs.tasks[0];
+  assert.equal(t.title, 'Final report');
+  assert.equal(Petal.taskDate(t), '2026-11-05');
+  assert.equal(t.status, 'pending');
+  assert.equal(t.effort, 'deep');
+});
+
+test('task times read in the phone time zone when the server runs in UTC', () => {
+  const s = Petal.migrate({ cycle, settings: { assistantCanUse: { schedule: true } }, logs: { tasks: [{ id: 't1', title: 'Gym', dueAt: '2026-10-31T23:30:00.000Z', type: 'personal', effort: 'light', status: 'pending' }] } });
+  assert.ok(Petal.buildAssistantContext(s, '2026-10-31', 60).text.includes('[task t1] 2026-11-01 00:30 Gym'));
+  assert.ok(Petal.buildAssistantContext(s, '2026-10-31', -240).text.includes('[task t1] 2026-10-31 19:30 Gym'));
+});

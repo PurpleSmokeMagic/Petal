@@ -185,11 +185,47 @@
     ).join('') + '</nav>';
   }
 
+  /*
+   * The person's avatar: their initial on a colour, an emoji, or a photo kept on this phone.
+   * Returns { style, inner } for a container of the given size; the shape comes from the container.
+   */
+  const AVATAR_BG = { plum: 'var(--plum)', coral: 'var(--period)', mint: 'var(--follicular)', sun: 'var(--ovulation)', sky: 'var(--luteal)' };
+  function avatarFace(p, size) {
+    const a = P.normalizeAvatar(p.avatar);
+    const initial = (p.displayName || 'P').charAt(0).toUpperCase();
+    const style = 'background: ' + (a.kind === 'photo' ? 'var(--surface-300)' : AVATAR_BG[a.color]) + '; color: ' + (a.color === 'plum' ? 'var(--on-action)' : 'var(--ink-on-fill)') +
+      '; overflow: hidden; padding: 0; display: flex; align-items: center; justify-content: center; font: 800 ' + Math.round(size * 0.42) + 'px/1 var(--font-sans)';
+    if (a.kind === 'photo') return { style, inner: '<img src="' + esc(a.photo) + '" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block">', label: 'your photo' };
+    if (a.kind === 'emoji') return { style: style + '; font-size: ' + Math.round(size * 0.5) + 'px', inner: '<span aria-hidden="true">' + a.emoji + '</span>', label: 'an emoji' };
+    return { style, inner: esc(initial), label: 'the letter ' + initial };
+  }
+
+  function avatarSheet() {
+    const p = store.getState().profile;
+    const a = P.normalizeAvatar(p.avatar);
+    const av = avatarFace(p, 96);
+    const kinds = [['initial', 'Letter'], ['emoji', 'Emoji'], ['photo', 'Photo']];
+    const seg = '<div class="seg" role="group" aria-label="Avatar style" style="align-self: center">' + kinds.map(([k, l]) =>
+      '<button class="' + (a.kind === k ? 'on' : '') + '" data-act="avatar-kind" data-value="' + k + '" aria-pressed="' + (a.kind === k) + '">' + l + '</button>').join('') + '</div>';
+    const colors = '<div style="display: flex; gap: 12px; justify-content: center" role="group" aria-label="Colour">' + P.AVATAR_COLORS.map((c) =>
+      '<button data-act="avatar-color" data-value="' + c + '" aria-label="' + c + '" aria-pressed="' + (a.color === c) + '" style="width: 40px; height: 40px; border-radius: 9999px; background: ' + AVATAR_BG[c] + '; border: 0; cursor: pointer; box-shadow: ' + (a.color === c ? '0 0 0 2px var(--surface-100), 0 0 0 4px var(--ink)' : 'inset 0 0 0 1px var(--border)') + '"></button>').join('') + '</div>';
+    const emojis = '<div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px" role="group" aria-label="Emoji">' + P.AVATAR_EMOJIS.map((e, i) =>
+      '<button data-act="avatar-emoji" data-value="' + i + '" aria-pressed="' + (a.emoji === e) + '" aria-label="Emoji ' + (i + 1) + '" style="height: 48px; border-radius: 16px; font-size: 26px; cursor: pointer; background: ' + (a.emoji === e ? 'var(--blush)' : 'var(--surface-300)') + '; border: 2px solid ' + (a.emoji === e ? 'var(--plum)' : 'transparent') + '">' + e + '</button>').join('') + '</div>';
+    const photo = '<div style="display: flex; flex-direction: column; gap: 8px">' +
+      '<button class="pt-btn pt-btn-secondary block" data-act="avatar-photo-pick">' + (a.photo ? 'Choose another photo' : 'Choose a photo') + '</button>' +
+      (a.photo ? '<button class="pt-btn pt-btn-text block" data-act="avatar-photo-remove">Remove photo</button>' : '') +
+      '<p class="t-cap" style="text-align: center">Your photo is cropped and shrunk on this phone and stays here. Petal never sends it anywhere.</p></div>';
+    return sheet('Your avatar', sheetHead('Your avatar') +
+      '<div style="display: flex; justify-content: center"><div class="petal" style="width: 96px; height: 96px; border: 2px solid var(--border); ' + av.style + '" role="img" aria-label="Avatar preview with ' + esc(av.label) + '">' + av.inner + '</div></div>' +
+      seg + (a.kind === 'photo' ? photo : (a.kind === 'emoji' ? emojis : '') + colors) +
+      '<button class="pt-btn pt-btn-primary block" data-act="close">Done</button>');
+  }
+
   function header() {
     const s = store.getState();
-    const initial = (s.profile.displayName || 'P').charAt(0).toUpperCase();
+    const av = avatarFace(s.profile, 44);
     return '<div class="top" style="justify-content: space-between">' +
-      '<button class="ico avatar" data-act="go" data-to="#/settings" aria-label="Profile and settings">' + esc(initial) + '</button>' +
+      '<button class="ico avatar" data-act="go" data-to="#/settings" aria-label="Profile and settings" style="' + av.style + '">' + av.inner + '</button>' +
       '<div style="display: flex; align-items: center; gap: 8px">' + LOGO + '<span style="font: 800 20px/24px var(--font-sans); color: var(--plum)">Petal</span></div>' +
       '<button class="ico" data-act="open" data-type="menu" aria-label="Settings" style="width: 44px; height: 44px">' + svg('dots') + '</button>' +
       '</div>';
@@ -270,13 +306,14 @@
   const SETUP = {
     1() {
       const p = store.getState().profile;
-      const initial = (p.displayName || '?').charAt(0).toUpperCase();
+      const av = avatarFace(p, 112);
       const un = ui.usernameEdit
         ? '<input id="un" class="inp" type="text" data-bind="profile.username" value="' + esc(p.username) + '" autocomplete="off">'
         : '<div class="inp-row"><span id="un" class="v">@' + esc(p.username || 'your_name') + '</span><button class="ico" data-act="edit-username" aria-label="Edit username">' + svg('edit') + '</button></div>';
       return setupFrame(1,
         '<h1 class="t-title">What should we call you?</h1><p class="t-sub">Your name appears on your home screen and in chats with your assistant.</p>' +
-        '<div style="margin-top: 32px; display: flex; justify-content: center"><div id="avatar" class="petal" style="width: 112px; height: 112px; background: var(--surface-300); border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 48px; font-weight: 800; color: var(--plum)" role="img" aria-label="Avatar preview with the letter ' + esc(initial) + '">' + esc(initial) + '</div></div>' +
+        '<div style="margin-top: 32px; display: flex; flex-direction: column; align-items: center; gap: 8px"><div id="avatar" class="petal" style="width: 112px; height: 112px; border: 2px solid var(--border); ' + av.style + '" role="img" aria-label="Avatar preview with ' + esc(av.label) + '">' + av.inner + '</div>' +
+        '<button class="pt-btn pt-btn-text" data-act="open" data-type="avatar">Customize avatar</button></div>' +
         '<div class="sec" style="margin-top: 32px"><div class="field"><label for="dn">Display name</label><input id="dn" class="inp" type="text" data-bind="profile.displayName" value="' + esc(p.displayName) + '" autocomplete="given-name" maxlength="40"></div>' +
         '<div class="field"><label for="un">Username</label>' + un + '<p class="t-cap">We made this one for you. You can change it now or later in your profile.</p></div></div>');
     },
@@ -348,7 +385,8 @@
         '<input id="h" class="inp" type="text" inputmode="decimal" data-bind="height" value="' + esc(hVal) + '"></div>' +
         '<div class="field"><div style="display: flex; align-items: center; justify-content: space-between"><label for="w">Weight</label>' + seg('Weight', 'kg', 'lbs', ui.weightUnit) + '</div>' +
         '<input id="w" class="inp" type="text" inputmode="decimal" data-bind="weight" value="' + esc(wVal) + '"></div>' +
-        '<div class="field"><label for="age">Age, optional</label><input id="age" class="inp" type="text" inputmode="numeric" data-bind="profile.age" value="' + esc(s.profile.age == null ? '' : s.profile.age) + '"><p class="t-cap">Makes your calorie target more accurate.</p></div></div>' +
+        '<div class="field"><label for="dob">Date of birth, optional</label><input id="dob" class="inp" type="date" data-bind="profile.birthDate" min="' + P.addDays(P.today(now()), -36890) + '" max="' + P.addDays(P.today(now()), -4383) + '" value="' + esc(s.profile.birthDate || '') + '">' +
+        '<p class="t-cap">Gives your age for a more accurate calorie target. It stays on this phone. The assistant only gets your age in years, and only if you share diet data.</p></div></div>' +
         '<div class="sec" style="gap: 8px"><div style="display: flex; align-items: center; justify-content: space-between"><h2 class="t-head">Health considerations</h2><span class="t-label" style="color: var(--plum)">Recommended</span></div>' +
         '<p class="t-cap">These change how hormones and metabolism are read. Pick all that apply.</p>' + chipGroup('health', 'conditions', s.health.conditions, LABELS.conditions) + '</div>');
     },
@@ -506,7 +544,7 @@
       '<div class="macros" style="margin-top: 16px">' + macro('Carbs', 'var(--luteal)', day.totals.carbsG, tg.carbsG) + macro('Protein', 'var(--action)', day.totals.proteinG, tg.proteinG) + macro('Fats', 'var(--ovulation)', day.totals.fatG, tg.fatG, '; box-shadow: inset 0 0 0 1px var(--ovulation-ink)') + '</div>' +
       '<p class="t-cap" style="margin-top: 12px">' + (day.target ? esc(day.target.basis) + '. Targets adjust to your phase and goal.' : 'Targets adjust to your phase and goal.') + '</p></section>' +
       '<button class="fab" data-act="go" data-to="#/assistant" aria-label="Open assistant chat">' + svg('chat') + '</button>' +
-      tabs('cycle') + '</div>';
+      greetBubble() + tabs('cycle') + '</div>';
   }
 
   /* ------------------------------------------------------------------ */
@@ -517,6 +555,7 @@
     const o = ui.overlay;
     if (!o || o.type === 'radial') return '';
     if (o.type === 'chat-options') return chatOptionsSheet();
+    if (o.type === 'avatar') return avatarSheet();
     if (o.type === 'ai-notice') return aiNoticeSheet();
     const t = P.today(now());
 
@@ -1297,18 +1336,19 @@
   function settingsScreen() {
     const s = store.getState();
     const p = s.profile, c = s.cycle, h = s.health;
-    const initial = (p.displayName || 'P').charAt(0).toUpperCase();
-    const body = [p.heightCm ? Math.round(p.heightCm) + ' cm' : null, p.weightKg ? Math.round(p.weightKg) + ' kg' : null, { loss: 'weight loss', gain: 'gain', maintain: 'maintenance' }[h.goal]].filter(Boolean).join(', ');
+    const av = avatarFace(p, 64);
+    const age = P.ageOn(p.birthDate, P.today(now()));
+    const body = [age ? age + ' years' : null, p.heightCm ? Math.round(p.heightCm) + ' cm' : null, p.weightKg ? Math.round(p.weightKg) + ' kg' : null, { loss: 'weight loss', gain: 'gain', maintain: 'maintenance' }[h.goal]].filter(Boolean).join(', ');
     const diet = h.dietStyles.map((d) => LABELS.dietStyles[d]).concat(h.allergies.map((a) => (LABELS.allergies[a] || a).toLowerCase())).join(', ').replace(/^./, (x) => x.toUpperCase());
     const life = [p.occupation ? LABELS.occupation[p.occupation] : null, p.isMom ? 'mom' : null].filter(Boolean).join(', ');
     const edit = (step) => 'data-act="edit-step" data-step="' + step + '"';
     return '<div class="ph">' + subPage('Settings', '#/') +
       '<section class="pt-card" style="margin-top: 16px; border-radius: 32px; display: flex; align-items: center; gap: 16px" aria-label="Profile">' +
-      '<div style="width: 64px; height: 64px; flex: none; border-radius: 96px 0 96px 0; background: var(--surface-300); border: 2px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font: 800 28px/1 var(--font-sans); color: var(--plum)">' + esc(initial) + '</div>' +
+      '<button data-act="open" data-type="avatar" aria-label="Change your avatar" style="width: 64px; height: 64px; flex: none; border-radius: 96px 0 96px 0; border: 2px solid var(--border-strong); cursor: pointer; ' + av.style + '">' + av.inner + '</button>' +
       '<div style="flex: 1; display: flex; flex-direction: column; min-width: 0"><b class="t-head">' + esc(p.displayName) + '</b><span class="t-cap">@' + esc(p.username) + '</span><span class="t-cap">Saved on this device</span></div>' +
       '<button class="ico" ' + edit(1) + ' aria-label="Edit profile">' + svg('edit') + '</button></section>' +
       settingsGroup('Your profile', [
-        settingsRow('user', 'Personal information', 'Name and username', edit(1)),
+        settingsRow('user', 'Personal information', 'Name, username and avatar', edit(1)),
         settingsRow('ruler', 'Body and goals', body || 'Add height and weight', edit(4)),
         settingsRow('drop', 'Cycle settings', c.cycleLength + ' day cycle, ' + c.periodLength + ' day period', edit(2)),
         settingsRow('face', 'Pain and flow', 'Pain ' + c.typicalPain + ' of 10, ' + c.typicalFlow + ' flow', edit(3)),
@@ -1521,13 +1561,50 @@
       '</aside>';
   }
 
+  /*
+   * Greeting: when Petal opens (or after logging back in) on the home screen, a bubble says hello
+   * and asks how the person is. A reply goes to the Assistant chat; nothing is sent until then.
+   */
+  let greet = null; // { open: true } while the bubble shows
+  let pendingGreet = null; // a reply typed before the person agreed to the assistant
+  const GREET_REPLIES = [['Good', 'I feel good today'], ['Tired', 'I feel tired today'], ['Stressed', 'I feel stressed today'], ['In pain', 'I have some pain today']];
+  function openGreeting() {
+    const s = store.getState();
+    if (s.settings.onboardingStep !== 'done' || s.settings.signedOut || route().name !== 'home') return;
+    greet = { open: true };
+    render();
+  }
+  function greetBubble() {
+    if (!greet) return '';
+    const name = store.getState().profile.displayName;
+    return '<aside class="tip-bubble pt-msg-ai" role="dialog" aria-label="Petal says hello">' +
+      '<div style="display: flex; align-items: center; gap: 8px">' + LOGO + '<b style="font: 700 15px/20px var(--font-sans); color: var(--ink); flex: 1">Petal</b>' +
+      '<button class="ico" data-act="greet-close" aria-label="Close" style="width: 36px; height: 36px">' + svg('close') + '</button></div>' +
+      '<span style="font: 600 17px/24px var(--font-sans)">Hello ' + esc(name || 'there') + ', how are you today?</span>' +
+      '<div class="chips">' + GREET_REPLIES.map(([l, t], i) => '<button class="opt" data-act="greet-reply" data-value="' + i + '">' + l + '</button>').join('') + '</div>' +
+      '<form data-form="greet" style="display: flex; gap: 8px"><input name="q" class="inp" type="text" maxlength="500" autocomplete="off" placeholder="Tell Petal" aria-label="Tell Petal how you are" style="flex: 1; height: 44px">' +
+      '<button class="pt-btn pt-btn-secondary" type="submit" style="height: 44px">Send</button></form></aside>';
+  }
+  function replyToGreeting(text) {
+    greet = null;
+    chat.briefed = true; // the reply opens the chat, so no separate briefing
+    go('#/assistant');
+    if (store.getState().settings.assistant.consent && chat.status === 'ready' && !chat.busy) sendToAgent(text);
+    else pendingGreet = text; // sent once the assistant is ready and the person agrees
+  }
+  function sendPending() {
+    if (chat.status !== 'ready' || !store.getState().settings.assistant.consent) return;
+    if (pendingPhoto) { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); return; }
+    if (pendingGreet && !chat.busy) { const t = pendingGreet; pendingGreet = null; chat.briefed = true; sendToAgent(t); }
+  }
+
   async function checkAgent() {
     chat.status = 'checking';
     render();
     chat.status = (await A.available()) ? 'ready' : 'unavailable';
     render();
-    // A photo picked before this check finished goes out now, if the person already agreed.
-    if (pendingPhoto && chat.status === 'ready' && store.getState().settings.assistant.consent) { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); }
+    // A photo or reply from before this check finished goes out now, if the person already agreed.
+    sendPending();
   }
 
   function contextChips(state, ctx) {
@@ -1564,7 +1641,7 @@
     const listOf = (values, labels) => values.map((v) => labels[v] || v).join(', ') || 'none';
     switch (name) {
       case 'update_profile':
-        add('Name', a.displayName); add('Age', a.age); add('Height', a.heightCm != null ? Math.round(a.heightCm) + ' cm' : undefined);
+        add('Name', a.displayName); add('Date of birth', a.birthDate ? fmtLong(a.birthDate) + ' ' + a.birthDate.slice(0, 4) : undefined); add('Height', a.heightCm != null ? Math.round(a.heightCm) + ' cm' : undefined);
         add('Weight', a.weightKg != null ? Math.round(a.weightKg * 10) / 10 + ' kg' : undefined);
         add('Daily activity', a.activityTier ? P.ACTIVITY_TIERS[a.activityTier].label : undefined);
         add('Occupation', a.occupation ? LABELS.occupation[a.occupation] : undefined); add('Mom', a.isMom === undefined ? undefined : a.isMom ? 'yes' : 'no');
@@ -1580,6 +1657,25 @@
         return { title: 'Update diet and health', lines };
       case 'add_task':
         return { title: 'Add task: ' + a.title, lines: [fmtLong(a.date) + ' at ' + a.time + ', ' + LABELS.taskType[a.type].toLowerCase() + ', ' + LABELS.effort[a.effort].toLowerCase() + ' effort'] };
+      case 'update_task': case 'complete_task': case 'remove_task': {
+        const task = P.findTarget(name, a, store.getState());
+        if (!task) return { title: 'This task is no longer in your planner', lines: [] };
+        const when = fmtLong(P.taskDate(task)) + ' at ' + fmtTime(task.dueAt);
+        if (name === 'complete_task') return { title: 'Mark as done: ' + task.title, lines: [when] };
+        if (name === 'remove_task') return { title: 'Remove: ' + task.title, lines: [when] };
+        add('Rename to', a.title);
+        if (a.date || a.time) add('Move to', fmtLong(a.date || P.taskDate(task)) + ' at ' + (a.time || fmtTime(task.dueAt)));
+        add('Type', a.type ? LABELS.taskType[a.type] : undefined); add('Effort', a.effort ? LABELS.effort[a.effort] : undefined);
+        lines.push('Now: ' + when);
+        return { title: 'Change: ' + task.title, lines };
+      }
+      case 'remove_log': {
+        const e = P.findTarget(name, a, store.getState());
+        if (!e) return { title: 'This log is no longer there', lines: [] };
+        if (a.kind === 'meal') return { title: 'Remove ' + LABELS.meal[e.meal].toLowerCase() + ': ' + e.name, lines: [fmtLong(e.date) + ', ' + num(e.kcal) + ' kcal'] };
+        if (a.kind === 'workout') return { title: 'Remove workout: ' + LABELS.workoutType[e.type].toLowerCase(), lines: [fmtLong(e.date) + ', ' + e.durationMin + ' minutes'] };
+        return { title: 'Remove mood: ' + e.moods.map((m) => P.MOODS[m].label.toLowerCase()).join(', '), lines: [fmtLong(e.date)] };
+      }
       case 'log_mood':
         return { title: 'Log mood: ' + a.moods.map((m) => P.MOODS[m].label.toLowerCase()).join(', '), lines: [a.note ? 'Note: ' + a.note : 'For today'] };
       case 'log_meal':
@@ -1600,8 +1696,22 @@
     const v = P.validateToolCall(name, args, P.today(now()));
     if (!v.ok || !v.write) return { ok: false, message: 'That could not be saved' };
     const a = v.args;
+    const state = store.getState();
+    const target = P.targetsEntry(v.name) ? P.findTarget(v.name, a, state) : null;
+    if (P.targetsEntry(v.name) && !target) return { ok: false, message: 'That entry is no longer there' };
     switch (v.name) {
-      case 'update_profile': store.actions.updateProfile(a); break;
+      // A date of birth replaces an age given before.
+      case 'update_profile': store.actions.updateProfile(a.birthDate ? Object.assign({ age: null }, a) : a); break;
+      case 'update_task': {
+        const cur = new Date(target.dueAt);
+        const [y, m, dd] = (a.date || P.taskDate(target)).split('-').map(Number);
+        const [hh, mm] = a.time ? a.time.split(':').map(Number) : [cur.getHours(), cur.getMinutes()];
+        store.actions.editTask(a.id, { title: a.title, type: a.type, effort: a.effort, dueAt: a.date || a.time ? new Date(y, m - 1, dd, hh, mm) : null });
+        break;
+      }
+      case 'complete_task': store.actions.completeTask(a.id); break;
+      case 'remove_task': store.actions.removeEntry('tasks', a.id); return { ok: true, message: 'Removed' };
+      case 'remove_log': store.actions.removeEntry({ meal: 'meals', workout: 'workouts', mood: 'moods' }[a.kind], a.id); return { ok: true, message: 'Removed' };
       case 'update_cycle': store.actions.updateCycle(a); break;
       case 'update_health': store.actions.updateHealth(a); break;
       case 'add_task': {
@@ -1625,8 +1735,8 @@
   function actionCard(act, mi, ai) {
     const d = describeAction(act.name, act.args);
     const foot = act.state === 'pending'
-      ? '<div style="display: flex; gap: 8px; margin-top: 8px"><button class="pt-btn pt-btn-secondary" data-act="action-save" data-m="' + mi + '" data-c="' + ai + '">Save</button><button class="pt-btn pt-btn-text" data-act="action-skip" data-m="' + mi + '" data-c="' + ai + '">Not now</button></div>'
-      : '<span class="t-cap" style="margin-top: 4px">' + (act.state === 'done' ? 'Saved.' : act.state === 'failed' ? 'Could not be saved.' : 'Not saved.') + '</span>';
+      ? '<div style="display: flex; gap: 8px; margin-top: 8px"><button class="pt-btn pt-btn-secondary" data-act="action-save" data-m="' + mi + '" data-c="' + ai + '">' + (/^remove_/.test(act.name) ? 'Remove' : act.name === 'complete_task' ? 'Mark done' : 'Save') + '</button><button class="pt-btn pt-btn-text" data-act="action-skip" data-m="' + mi + '" data-c="' + ai + '">Not now</button></div>'
+      : '<span class="t-cap" style="margin-top: 4px">' + (act.state === 'done' ? (/^remove_/.test(act.name) ? 'Removed.' : 'Saved.') : act.state === 'failed' ? 'Could not be saved.' : 'Not saved.') + '</span>';
     return '<div class="pt-card" style="padding: 12px 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 2px"><b style="font: 700 15px/20px var(--font-sans); color: var(--ink); overflow-wrap: anywhere">' + esc(d.title) + '</b>' +
       d.lines.map((l) => '<span class="t-cap" style="overflow-wrap: anywhere">' + esc(l) + '</span>').join('') + foot + '</div>';
   }
@@ -1824,6 +1934,24 @@
     });
   }
 
+  // The avatar photo: cropped to a 256 px square JPEG on the phone, kept in local storage only.
+  const avatarInput = document.getElementById('avatar-in');
+  if (avatarInput) {
+    avatarInput.addEventListener('change', async () => {
+      const file = avatarInput.files && avatarInput.files[0];
+      avatarInput.value = '';
+      if (!file) return;
+      try {
+        const photo = await A.preparePhoto(file, { square: 256 });
+        const a = P.normalizeAvatar(Object.assign({}, store.getState().profile.avatar, { kind: 'photo', photo }));
+        if (a.kind !== 'photo') throw new Error('too_big');
+        store.actions.updateProfile({ avatar: a });
+      } catch (e) {
+        toast('That photo could not be used. Try another one');
+      }
+    });
+  }
+
   // One turn: send the message, stream the answer, collect proposed changes.
   async function sendToAgent(text, opts) {
     const briefing = Boolean(opts && opts.briefing);
@@ -1960,7 +2088,7 @@
       workout: workoutHome, weights: weightsScreen, gym: () => listScreen('gym'), bodyweight: () => listScreen('bodyweight'), mat: pilatesYogaScreen, run: runScreen,
       assistant: assistantScreen, setupChat: setupChatScreen, settings: settingsScreen, mode: modeScreen, subscription: subscriptionScreen, notifications: notificationsScreen, privacy: privacyScreen, welcome: welcomeBack };
     let html = screens[r.name]();
-    if (r.name !== 'setup' && r.name !== 'welcome') html += overlay();
+    if ((r.name !== 'setup' && r.name !== 'welcome') || (ui.overlay && ui.overlay.type === 'avatar')) html += overlay();
     if (ui.toast) html += '<div class="toast app-toast" role="status">' + svg('tick') + esc(ui.toast) + '</div>';
     app.innerHTML = html;
 
@@ -2024,7 +2152,7 @@
     },
     'agent-agree': () => {
       store.actions.updateAssistant({ consent: true });
-      if (pendingPhoto && chat.status === 'ready') { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); }
+      sendPending();
     },
     'agent-withdraw': () => {
       if (chat.abort) chat.abort.abort();
@@ -2036,6 +2164,20 @@
     'photo-pick': () => { if (photoInput && !chat.busy) photoInput.click(); },
     'workout-tip': () => { go('#/workout'); startWorkoutTip(); render(); },
     'workout-tip-close': () => { closeWorkoutTip(); render(); },
+    'greet-close': () => { greet = null; render(); },
+    'greet-reply': (d) => { const r = GREET_REPLIES[Number(d.value)]; if (r) replyToGreeting(r[1]); },
+    'avatar-kind': (d) => {
+      const a = P.normalizeAvatar(store.getState().profile.avatar);
+      if (d.value === 'photo' && !a.photo) { ACTIONS['avatar-photo-pick'](); return; }
+      store.actions.updateProfile({ avatar: Object.assign(a, { kind: d.value }) });
+    },
+    'avatar-color': (d) => store.actions.updateProfile({ avatar: Object.assign(P.normalizeAvatar(store.getState().profile.avatar), { color: d.value }) }),
+    'avatar-emoji': (d) => {
+      const e = P.AVATAR_EMOJIS[Number(d.value)];
+      if (e) store.actions.updateProfile({ avatar: Object.assign(P.normalizeAvatar(store.getState().profile.avatar), { kind: 'emoji', emoji: e }) });
+    },
+    'avatar-photo-pick': () => { if (avatarInput) avatarInput.click(); },
+    'avatar-photo-remove': () => store.actions.updateProfile({ avatar: Object.assign(P.normalizeAvatar(store.getState().profile.avatar), { kind: 'initial', photo: '' }) }),
     'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
     'chat-clear': () => {
       if (chat.abort) chat.abort.abort();
@@ -2075,7 +2217,7 @@
     'edit-step': (d) => { ui.editReturn = location.hash; go('#/setup/' + d.step); },
     'set-theme': (d) => store.actions.updateSettings({ theme: d.value }),
     logout: () => { ui.overlay = null; ui.session = null; ui.run = null; store.actions.updateSettings({ signedOut: true }); },
-    login: () => { store.actions.updateSettings({ signedOut: false }); go('#/'); },
+    login: () => { store.actions.updateSettings({ signedOut: false }); go('#/'); openGreeting(); },
     'notify-all': () => {
       const n = store.getState().settings.notifications;
       if (!n.enabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
@@ -2312,10 +2454,10 @@
         store.actions.updateProfile(patch);
       });
       const p = store.getState().profile;
-      const initial = (p.displayName || '?').charAt(0).toUpperCase();
+      const face = avatarFace(p, 112);
       const av = document.getElementById('avatar');
-      av.textContent = initial;
-      av.setAttribute('aria-label', 'Avatar preview with the letter ' + initial);
+      av.innerHTML = face.inner;
+      av.setAttribute('aria-label', 'Avatar preview with ' + face.label);
       const un = document.getElementById('un');
       if (un && un.tagName === 'SPAN') un.textContent = '@' + (p.username || 'your_name');
       el.removeAttribute('aria-invalid');
@@ -2344,9 +2486,10 @@
         if (!Number.isFinite(kg) || kg < 30) kg = undefined;
       }
       if (kg !== undefined) silent(() => store.actions.updateProfile({ weightKg: kg }));
-    } else if (bind === 'profile.age') {
-      const n = v.trim() ? Number(v) : null;
-      if (n === null || (Number.isFinite(n) && n >= 12 && n <= 70)) silent(() => store.actions.updateProfile({ age: n }));
+    } else if (bind === 'profile.birthDate') {
+      const age = P.ageOn(v, P.today(now()));
+      if (!v) silent(() => store.actions.updateProfile({ birthDate: null }));
+      else if (age != null && age >= 12 && age <= 100) silent(() => store.actions.updateProfile({ birthDate: v, age: null }));
     } else if (bind === 'allergyQuery') {
       ui.allergyQuery = v;
       render();
@@ -2371,6 +2514,11 @@
     if (kind === 'chat') {
       const q = String(f.q || '').trim().slice(0, 1000);
       if (q && !chat.busy) sendToAgent(q);
+      return;
+    }
+    if (kind === 'greet') {
+      const q = String(f.q || '').trim().slice(0, 500);
+      if (q) replyToGreeting(q);
       return;
     }
     if (kind === 'meal') {
@@ -2398,6 +2546,7 @@
     if (location.hash === '#/settings/mode' && from !== '#/settings/mode') ui.settingsBack = from.startsWith('#/setup') ? '#/' : from;
     if (!location.hash.startsWith('#/setup/')) ui.editReturn = null;
     if (location.hash !== '#/workout') closeWorkoutTip();
+    if (location.hash !== '#/' && location.hash !== '') greet = null;
     if (!ui.keepOverlay) ui.overlay = null;
     ui.keepOverlay = false;
     render();
@@ -2419,6 +2568,7 @@
     setTimeout(() => {
       splash.classList.add('out');
       setTimeout(() => splash.remove(), 350);
+      openGreeting();
     }, Math.max(0, 1000 - performance.now()));
-  }
+  } else openGreeting();
 })();

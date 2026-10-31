@@ -95,7 +95,7 @@ TDEE = BMR × activity factor (1.2, 1.375, 1.55 or 1.725)
 kcal = TDEE × (1 − 0.15 for loss | + 0.10 for gain | 0 for maintain)
 ```
 
-- Age defaults to 30 when not given, and the basis line says so.
+- Age comes from the date of birth (or an age from an older save), defaults to 30 when not given, and the basis line says so.
 - Macros: 45% carbs, 25% protein, 30% fat.
 - **Pro, late luteal:** +100 kcal and 50 / 22 / 28% macros.
 - Micronutrient focus by phase: menstrual iron, magnesium, B vitamins; follicular vitamin E, zinc; ovulation fibre, antioxidants; luteal magnesium, calcium, vitamin B6.

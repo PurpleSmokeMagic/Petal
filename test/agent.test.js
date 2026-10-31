@@ -250,3 +250,17 @@ test('thinking text from a model is never shown, even when the tags are split', 
   assert.equal(shown.join(''), 'Lentil soup. <b>ok</b>');
   assert.equal(sentBody.reasoning_format, 'hidden');
 });
+
+test('a change to an entry the data does not have is refused, a real one is proposed', async () => {
+  const s = state({ settings: { assistantCanUse: { schedule: true } }, logs: { tasks: [{ id: 'task-1', title: 'Report', dueAt: '2026-11-02T09:00:00.000Z', type: 'work', effort: 'deep', status: 'pending' }] } });
+  const { llm, seen } = scripted([
+    { calls: [['update_task', { id: 'task-1', date: '2026-11-05' }], ['remove_task', { id: 'not-there' }]] },
+    { content: 'I suggested moving it.' },
+  ]);
+  const events = [];
+  await runAgent({ llm, mode: 'chat', today: TODAY, tzOffset: 60, state: s, messages: [{ role: 'user', content: 'move my report' }], onEvent: (e) => events.push(e) });
+  assert.deepEqual(events.filter((e) => e.type === 'action'), [{ type: 'action', name: 'update_task', args: { id: 'task-1', date: '2026-11-05' } }]);
+  assert.match(seen[1].messages.filter((m) => m.role === 'tool')[1].content, /No entry with that id/);
+  assert.match(seen[0].messages[0].content, /\[task task-1\] 2026-11-02 10:00 Report/);
+  assert.ok(seen[0].tools.includes('remove_log'));
+});

@@ -8,6 +8,7 @@
  *   PetalAssistant.sendPhoto({ today, snapshot, image, note, signal, onToken, onAction })
  *                               -> the same, through Petal Lens (/api/lens), for one photo
  *   PetalAssistant.preparePhoto(file) -> JPEG data URL, at most 1024 px, metadata removed
+ *   PetalAssistant.preparePhoto(file, { square: 256 }) -> a square crop for the avatar, kept on the phone
  *
  * Security notes (see SECURITY.md):
  * - Same origin, fixed path, no keys in the browser.
@@ -36,22 +37,31 @@
 
   // Redraws the photo on a canvas: shrinks it to 1024 px at most and drops EXIF, so location
   // and camera details never leave the phone. Returns a JPEG data URL.
-  async function preparePhoto(file) {
+  async function preparePhoto(file, opts) {
+    const square = opts && opts.square;
     // Some phones send photos with no type, so decoding below is the real check.
     if (!file || (file.type && !/^image\//i.test(file.type))) throw new Error('not_image');
     if (file.size > 25 * 1024 * 1024) throw new Error('too_big');
     const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    if (square) {
+      // Centre crop to a square, then shrink.
+      const side = Math.min(bitmap.width, bitmap.height);
+      canvas.width = canvas.height = Math.min(square, side);
+      canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+    } else {
+      const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    }
     if (bitmap.close) bitmap.close();
-    return canvas.toDataURL('image/jpeg', 0.82);
+    return canvas.toDataURL('image/jpeg', square ? 0.8 : 0.82);
   }
 
   function send({ mode, today, snapshot, messages, signal, onToken, onAction }) {
-    return stream(ENDPOINT, { mode, today, snapshot, messages }, { signal, onToken, onAction });
+    // The phone's offset from UTC lets the agent read task times the way the person sees them.
+    return stream(ENDPOINT, { mode, today, tzOffset: -new Date().getTimezoneOffset(), snapshot, messages }, { signal, onToken, onAction });
   }
 
   function sendPhoto({ today, snapshot, image, note, signal, onToken, onAction }) {

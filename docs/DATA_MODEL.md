@@ -6,7 +6,7 @@ Everything lives in one JSON object in the browser's `localStorage` under the ke
 
 | Section | Fields |
 |---|---|
-| `profile` | `displayName`, `username` (generated, editable), `heightCm`, `weightKg`, `units` (`metric` or `imperial`, display only), `age` (optional), `activityTier` (1 to 4), `workoutsLiked`, `occupation` (`student`, `professional`, `homemaker`, `freelancer`), `isMom`, `sexuallyActive` (optional) |
+| `profile` | `displayName`, `username` (generated, editable), `heightCm`, `weightKg`, `units` (`metric` or `imperial`, display only), `birthDate` (optional, `YYYY-MM-DD`; gives the age), `age` (older saves only; `birthDate` wins), `avatar` (`{ kind: initial | emoji | photo, color, emoji, photo }`; the photo is a JPEG data URL of at most 120 KB, made on the phone), `activityTier` (1 to 4), `workoutsLiked`, `occupation` (`student`, `professional`, `homemaker`, `freelancer`), `isMom`, `sexuallyActive` (optional) |
 | `cycle` | `lastPeriodStart`, `cycleLength`, `periodLength`, `typicalPain` (1 to 10), `typicalFlow` (`light`, `medium`, `heavy`) |
 | `health` | `goal` (`loss`, `gain`, `maintain`), `conditions`, `dietStyles`, `allergies` |
 | `logs` | Flat arrays, see below |

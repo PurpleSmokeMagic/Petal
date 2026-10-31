@@ -23,7 +23,7 @@ app (browser) ──POST /api/agent──> Petal agent (Vercel function) ──>
 | Mode | Where | Tools |
 |---|---|---|
 | `setup` | Setup step 1, **Set up by chatting instead** (`#/setup/chat`) | `get_cycle_overview`, `update_profile`, `update_cycle`, `update_health`, `finish_setup` |
-| `chat` | Assistant tab (`#/assistant`) | all read tools, `update_profile`, `update_cycle`, `update_health`, `add_task`, `log_mood`, `log_meal`, `log_workout`, `log_period` |
+| `chat` | Assistant tab (`#/assistant`) | all read tools, `update_profile`, `update_cycle`, `update_health`, `add_task`, `update_task`, `complete_task`, `remove_task`, `remove_log`, `log_mood`, `log_meal`, `log_workout`, `log_period` |
 | `photo` | **Petal Lens**: the camera button in the Assistant chat, or **Photo** on the dashboard. Endpoint `/api/lens` | `get_cycle_overview`, `get_workout_plan`, `get_calorie_target`, `log_meal`, `log_workout` |
 
 In setup mode the agent asks one topic at a time, in the order of the setup forms, skipping what is answered. It receives only yes or no for each setup topic, never the values. Setup can only finish after the name and last period start are saved, and `completeSetup()` checks this again.
@@ -33,6 +33,19 @@ In setup mode the agent asks one topic at a time, in the order of the setup form
 When the Assistant tab opens on an empty chat, Petal speaks first: it greets the person, says what it notices today from their phase and logs (meals, moods, symptoms, workouts, tasks), then gives recommendations under **Meals** and **Workouts**. The prompt is not shown as a message, and the briefing cannot propose changes.
 
 The model writes "Hello NAME," and the app puts the real name in on the phone, so the name is still never sent. The consent screen offers **Agree and use my logs** (turns on all four sharing toggles) or **Agree, phase only**. With phase only, the briefing says what sharing more would add.
+
+## Organising the day
+
+The agent can propose changes to entries that already exist. Each entry in the data it gets carries its id, written like `[task 1f3…]`, `[meal …]`, `[workout …]` or `[mood …]`.
+
+- `update_task` moves a task to another day or time, renames it, or changes its type or effort. `complete_task` marks it done. `remove_task` deletes it, only when asked.
+- `remove_log` deletes a logged meal, workout or mood the person says is wrong.
+- **Guards:** ids must look like ids (`[\w-]`, 64 characters at most). The server refuses an id that is not in the shared data, so the model cannot touch what it was not shown, and the app checks again before saving. Nothing changes until the person taps Save, Remove, Mark done or Save all.
+- Up to 10 changes per message, so a whole day can be planned at once. Task times are read in the phone's time zone (`tzOffset`, sent by the app).
+
+## Greeting
+
+When Petal opens on Home after setup, or after logging back in, a bubble says "Hello <name>, how are you today?" with quick replies and a text field. Nothing is sent until the person replies; the reply then opens the Assistant chat (after consent, if not given yet) and replaces the daily briefing for that visit.
 
 ## Petal Lens (photos)
 
@@ -52,7 +65,7 @@ Cycle day, phase, the period logs and the predicted range are always included. E
 |---|---|
 | `mood` | Moods and notes from the last 30 days |
 | `pain` | Typical pain and flow, symptoms from the last 30 days |
-| `diet` | Goal, diet style, allergies, conditions, height, weight, age, activity, meals from the last 7 days |
+| `diet` | Goal, diet style, allergies, conditions, height, weight, age in years (never the date of birth), activity, meals from the last 7 days |
 | `schedule` | Occupation, mom, workouts liked, tasks from 7 days back to 30 ahead, workouts from the last 14 days |
 
 The snapshot never includes the name, username, email or ids. In setup mode the person may type their name; it then reaches Groq as chat text, and the consent screen says so. On the server, the snapshot goes through `Petal.migrate()` like any untrusted import.

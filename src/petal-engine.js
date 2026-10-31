@@ -84,7 +84,7 @@
 
   // Kept in one place so a nutrition reviewer can tune it.
   const NUTRITION_CONFIG = {
-    defaultAge: 30,               // the onboarding does not ask for age yet
+    defaultAge: 30,               // used when no date of birth is given
     goalAdjust: { loss: -0.15, gain: 0.10, maintain: 0 },
     lateLutealDays: 7,            // last N days of the cycle count as late luteal
     lateLutealKcal: 100,
@@ -164,6 +164,28 @@
     return Number.isFinite(n) ? n : fallback;
   }
 
+  // Avatar choices. The photo is a small JPEG made on the phone; emoji and colours come from fixed lists.
+  const AVATAR_COLORS = ['plum', 'coral', 'mint', 'sun', 'sky'];
+  const AVATAR_EMOJIS = ['\u{1F338}', '\u{1F33A}', '\u{1F33F}', '\u{1F319}', '\u2600\uFE0F', '\u{1F98B}', '\u{1F431}', '\u{1F3C3}\u200D\u2640\uFE0F', '\u{1F9D8}\u200D\u2640\uFE0F', '\u{1F4DA}', '\u{1F353}', '\u2728'];
+  const AVATAR_PHOTO_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
+  const AVATAR_PHOTO_MAX = 120000;
+  function normalizeAvatar(a) {
+    const v = a && typeof a === 'object' ? a : {};
+    const out = { kind: 'initial', color: AVATAR_COLORS.includes(v.color) ? v.color : 'plum', emoji: AVATAR_EMOJIS.includes(v.emoji) ? v.emoji : AVATAR_EMOJIS[0], photo: '' };
+    if (typeof v.photo === 'string' && v.photo.length <= AVATAR_PHOTO_MAX && AVATAR_PHOTO_RE.test(v.photo)) out.photo = v.photo;
+    if (v.kind === 'emoji') out.kind = 'emoji';
+    if (v.kind === 'photo' && out.photo) out.kind = 'photo';
+    return out;
+  }
+
+  // Whole years between a date of birth and a day, or null.
+  function ageOn(birthDate, todayIso) {
+    if (!isISODate(birthDate) || !isISODate(todayIso) || birthDate > todayIso) return null;
+    const [by, bm, bd] = birthDate.split('-').map(Number);
+    const [ty, tm, td] = todayIso.split('-').map(Number);
+    return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
+  }
+
   function uid() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
     return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -184,7 +206,9 @@
         heightCm: null,
         weightKg: null,
         units: 'metric',         // 'metric' | 'imperial' (display only, storage stays metric)
-        age: null,               // optional, used for calorie targets
+        birthDate: null,         // optional "YYYY-MM-DD", gives the age for calorie targets
+        age: null,               // older saves and the agent snapshot only; birthDate wins when set
+        avatar: { kind: 'initial', color: 'plum', emoji: '', photo: '' },
         activityTier: 1,         // 1 to 4, see ACTIVITY_TIERS
         workoutsLiked: [],       // WORKOUT_PREFERENCES
         occupation: null,        // OCCUPATIONS
@@ -252,7 +276,12 @@
     if ('username' in out) out.username = String(out.username || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 30);
     if ('heightCm' in out) out.heightCm = out.heightCm == null ? null : clamp(Number(out.heightCm), 100, 230);
     if ('weightKg' in out) out.weightKg = out.weightKg == null ? null : clamp(Number(out.weightKg), 30, 250);
-    if ('age' in out) out.age = out.age == null ? null : clamp(toInt(out.age, 30), 12, 70);
+    if ('age' in out) out.age = out.age == null ? null : clamp(toInt(out.age, 30), 12, 100);
+    if ('birthDate' in out) {
+      const age = ageOn(out.birthDate, toISODate(new Date()));
+      out.birthDate = age != null && age >= 12 && age <= 100 ? out.birthDate : null;
+    }
+    if ('avatar' in out) out.avatar = normalizeAvatar(out.avatar);
     if ('activityTier' in out) out.activityTier = clamp(toInt(out.activityTier, 1), 1, 4);
     if ('workoutsLiked' in out) out.workoutsLiked = pickList(out.workoutsLiked, WORKOUT_PREFERENCES);
     if ('occupation' in out && !OCCUPATIONS.includes(out.occupation)) out.occupation = null;
@@ -472,7 +501,8 @@
   function getCalorieTarget(state, now) {
     const { profile, health, settings } = state;
     if (!profile.weightKg || !profile.heightCm) return null;
-    const age = profile.age || NUTRITION_CONFIG.defaultAge;
+    const known = ageOn(profile.birthDate, toISODate(now)) || profile.age;
+    const age = known || NUTRITION_CONFIG.defaultAge;
     const bmr = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * age - 161;
     const tdee = bmr * ACTIVITY_TIERS[profile.activityTier].factor;
     let kcal = tdee * (1 + NUTRITION_CONFIG.goalAdjust[health.goal]);
@@ -491,7 +521,7 @@
       fatG: Math.round((kcal * split.fat) / g.fat),
       phaseScaled: scaled,
       micronutrientFocus: phase ? NUTRITION_CONFIG.micronutrientFocus[phase.phase] : [],
-      basis: profile.age ? 'Based on your height, weight, age and activity' : 'Based on your height, weight and activity (age assumed 30)',
+      basis: known ? 'Based on your height, weight, age and activity' : 'Based on your height, weight and activity (age assumed 30)',
     };
   }
 
@@ -780,8 +810,18 @@
    * Never names, usernames, emails or ids. Returns the prompt text and the basis labels
    * the UI shows under every answer.
    */
-  function buildAssistantContext(state, todayIso) {
+  /*
+   * tzOffset: minutes ahead of UTC on the person's phone (the server runs in UTC), so task
+   * days and times read the way they see them. Left out in the browser.
+   */
+  function buildAssistantContext(state, todayIso, tzOffset) {
     const allow = state.settings.assistantCanUse;
+    const local = (iso) => {
+      const d = new Date(iso);
+      if (tzOffset == null) return { date: toISODate(d), time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') };
+      const s = new Date(d.getTime() + tzOffset * 60000).toISOString();
+      return { date: s.slice(0, 10), time: s.slice(11, 16) };
+    };
     const lines = [];
     const basis = [];
     const info = getPhaseInfo(state.cycle, todayIso, state.logs.periods);
@@ -797,7 +837,7 @@
     const since = addDays(todayIso, -6);
     if (allow.mood) {
       const recent = state.logs.moods.filter((m) => m.date >= since && m.date <= todayIso);
-      lines.push(recent.length ? 'Moods in the last 7 days: ' + recent.map((m) => m.date + ' ' + m.moods.join(', ') + (m.note ? ' (note: ' + m.note.slice(0, 200) + ')' : '')).join('; ') + '.' : 'No moods logged in the last 7 days.');
+      lines.push(recent.length ? 'Moods in the last 7 days: ' + recent.map((m) => '[mood ' + m.id + '] ' + m.date + ' ' + m.moods.join(', ') + (m.note ? ' (note: ' + m.note.slice(0, 200) + ')' : '')).join('; ') + '.' : 'No moods logged in the last 7 days.');
       basis.push(recent.some((m) => m.date === todayIso) ? 'mood logged today' : 'recent moods');
     }
     if (allow.pain) {
@@ -810,7 +850,10 @@
       const h = state.health;
       lines.push('Goal: ' + h.goal + '. Diet style: ' + (h.dietStyles.join(', ') || 'none set') + '. Allergies or avoids: ' + (h.allergies.join(', ') || 'none') + '. Conditions: ' + (h.conditions.join(', ') || 'none') + '.');
       const meals = state.logs.meals.filter((m) => m.date === todayIso);
-      if (meals.length) lines.push('Eaten today: ' + meals.map((m) => m.meal + ' ' + m.name.slice(0, 60) + ' ' + Math.round(m.kcal) + ' kcal').join('; ') + '.');
+      const p = state.profile;
+      const age = p.age || ageOn(p.birthDate, todayIso);
+      if (p.weightKg || p.heightCm) lines.push('Body: ' + [p.heightCm ? Math.round(p.heightCm) + ' cm' : '', p.weightKg ? Math.round(p.weightKg * 10) / 10 + ' kg' : '', age ? 'age ' + age : ''].filter(Boolean).join(', ') + '.');
+      if (meals.length) lines.push('Eaten today: ' + meals.map((m) => '[meal ' + m.id + '] ' + m.meal + ' ' + m.name.slice(0, 60) + ' ' + Math.round(m.kcal) + ' kcal').join('; ') + '.');
       const limits = h.dietStyles.filter((d) => d !== 'none').concat(h.allergies.map((x) => x + ' free')).slice(0, 2);
       basis.push(limits.length ? limits.join(' and ') + ' diet' : 'no diet limits');
     }
@@ -818,10 +861,12 @@
       const p = state.profile;
       if (p.occupation) lines.push('Occupation: ' + p.occupation + (p.isMom ? ', a mom' : '') + '.');
       const end = addDays(todayIso, 6);
-      const tasks = state.logs.tasks.filter((t) => { const d = taskDate(t); return d >= todayIso && d <= end && t.status !== 'done'; });
-      lines.push(tasks.length ? 'Open tasks this week: ' + tasks.map((t) => taskDate(t) + ' ' + t.title.slice(0, 80) + ' (' + t.type + ', ' + t.effort + ' effort)').join('; ') + '.' : 'No open tasks this week.');
+      const row = (t) => { const l = local(t.dueAt); return '[task ' + t.id + '] ' + l.date + ' ' + l.time + ' ' + t.title.slice(0, 80) + ' (' + t.type + ', ' + t.effort + ' effort, ' + t.status + ')'; };
+      const tasks = state.logs.tasks.filter((t) => { const d = local(t.dueAt).date; return d >= since && d <= end && (t.status !== 'done' || d === todayIso); })
+        .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1)).slice(0, 40);
+      lines.push(tasks.length ? 'Tasks from the last 7 days to the next 7 (open, missed, and done today): ' + tasks.map(row).join('; ') + '.' : 'No tasks in the last or next 7 days.');
       const w = state.logs.workouts.filter((x) => x.date >= since);
-      if (w.length) lines.push('Workouts in the last 7 days: ' + w.map((x) => x.date + ' ' + x.type + ' ' + x.durationMin + ' min effort ' + x.effort).join('; ') + '.');
+      if (w.length) lines.push('Workouts in the last 7 days: ' + w.map((x) => '[workout ' + x.id + '] ' + x.date + ' ' + x.type + ' ' + x.durationMin + ' min effort ' + x.effort).join('; ') + '.');
       basis.push('your schedule');
     }
     return { text: lines.join('\n'), basis, phase: info ? info.phase : null, cycleDay: info ? info.cycleDay : null };
@@ -861,7 +906,8 @@
     if (allow.mood) snap.logs.moods = state.logs.moods.filter((m) => after(-30)(m.date));
     if (allow.diet) {
       snap.health = Object.assign({}, state.health);
-      Object.assign(snap.profile, { heightCm: p.heightCm, weightKg: p.weightKg, age: p.age, activityTier: p.activityTier });
+      // An age in whole years is enough for calorie targets, so the date of birth stays on the phone.
+      Object.assign(snap.profile, { heightCm: p.heightCm, weightKg: p.weightKg, age: ageOn(p.birthDate, todayIso) || p.age, activityTier: p.activityTier });
       snap.logs.meals = state.logs.meals.filter((m) => after(-7)(m.date));
     }
     if (allow.schedule) {
@@ -885,7 +931,8 @@
     get_workout_plan: { kind: 'read', def: fn('get_workout_plan', 'Today\'s training plan: intensity cap 1 to 5, suggested load, workout types ranked for the phase, running minutes.', {}) },
     get_calorie_target: { kind: 'read', def: fn('get_calorie_target', 'Today\'s calorie and macro target. Needs diet data to be shared.', {}) },
     update_profile: { kind: 'action', def: fn('update_profile', 'Propose changes to the profile. Only include fields the person told you.', {
-      displayName: { type: 'string', description: 'What to call them' }, age: { type: 'integer' }, heightCm: { type: 'number' }, weightKg: { type: 'number' },
+      displayName: { type: 'string', description: 'What to call them' }, birthDate: { type: 'string', description: 'Date of birth, YYYY-MM-DD. Ask for the full date, never just the age.' },
+      heightCm: { type: 'number' }, weightKg: { type: 'number', description: 'Current weight in kg. Use this when they tell you a new weight.' },
       activityTier: { type: 'integer', description: '1 sedentary, 2 lightly active, 3 moderately active, 4 very active' }, occupation: { type: 'string', enum: OCCUPATIONS },
       isMom: { type: 'boolean' }, workoutsLiked: listOf(WORKOUT_PREFERENCES) }) },
     update_cycle: { kind: 'action', def: fn('update_cycle', 'Propose changes to the cycle baseline. Only include fields the person told you.', {
@@ -893,7 +940,11 @@
       periodLength: { type: 'integer', description: '2 to 10 days' }, typicalPain: { type: 'integer', description: '1 to 10' }, typicalFlow: { type: 'string', enum: FLOW } }) },
     update_health: { kind: 'action', def: fn('update_health', 'Propose diet and health answers. Lists replace the current list, so include everything the person wants.', {
       goal: { type: 'string', enum: GOALS }, conditions: listOf(CONDITIONS), dietStyles: listOf(DIET_STYLES), allergies: { type: 'array', items: { type: 'string' }, description: 'Use gluten, dairy, nuts, soy, shellfish, or a short custom word' } }) },
-    add_task: { kind: 'action', def: fn('add_task', 'Propose a task for the planner.', { title: { type: 'string' }, date, time: { type: 'string', description: 'HH:MM, 24 hour' }, type: { type: 'string', enum: TASK_TYPES }, effort: { type: 'string', enum: TASK_EFFORT } }, ['title', 'date']) },
+    add_task: { kind: 'action', def: fn('add_task', 'Propose a task or event for the planner, such as a meeting, a study block, a workout slot or a meal prep slot.', { title: { type: 'string' }, date, time: { type: 'string', description: 'HH:MM, 24 hour' }, type: { type: 'string', enum: TASK_TYPES }, effort: { type: 'string', enum: TASK_EFFORT } }, ['title', 'date']) },
+    update_task: { kind: 'action', target: 'tasks', def: fn('update_task', 'Propose changing an existing task: move it to another day or time, rename it, or change its type or effort. Use the id from [task id] in the data. Only include what changes.', { id: { type: 'string' }, title: { type: 'string' }, date, time: { type: 'string', description: 'HH:MM, 24 hour' }, type: { type: 'string', enum: TASK_TYPES }, effort: { type: 'string', enum: TASK_EFFORT } }, ['id']) },
+    complete_task: { kind: 'action', target: 'tasks', def: fn('complete_task', 'Propose marking an existing task as done.', { id: { type: 'string' } }, ['id']) },
+    remove_task: { kind: 'action', target: 'tasks', def: fn('remove_task', 'Propose deleting an existing task. Only when they ask to remove or cancel it.', { id: { type: 'string' } }, ['id']) },
+    remove_log: { kind: 'action', def: fn('remove_log', 'Propose deleting a logged meal, workout or mood they say is wrong. Use the id from [meal id], [workout id] or [mood id] in the data.', { kind: { type: 'string', enum: ['meal', 'workout', 'mood'] }, id: { type: 'string' } }, ['kind', 'id']) },
     log_mood: { kind: 'action', def: fn('log_mood', 'Propose logging moods for today.', { moods: listOf(Object.keys(MOODS)), note: { type: 'string' } }, ['moods']) },
     log_meal: { kind: 'action', def: fn('log_meal', 'Propose logging a meal. Estimate calories and macros only if the person asks you to.', { meal: { type: 'string', enum: MEALS }, name: { type: 'string' }, date, kcal: { type: 'number' }, carbsG: { type: 'number' }, proteinG: { type: 'number' }, fatG: { type: 'number' } }, ['meal', 'name']) },
     log_workout: { kind: 'action', def: fn('log_workout', 'Propose logging a finished workout.', { type: { type: 'string', enum: WORKOUT_TYPES }, durationMin: { type: 'integer' }, effort: { type: 'integer', description: '1 to 10' }, date }, ['type', 'durationMin']) },
@@ -902,7 +953,7 @@
   };
   // Tools offered in each mode. Setup cannot touch tasks or logs, and chat cannot finish setup.
   const AGENT_MODES = {
-    chat: ['get_phase', 'get_cycle_overview', 'get_workout_plan', 'get_calorie_target', 'update_profile', 'update_cycle', 'update_health', 'add_task', 'log_mood', 'log_meal', 'log_workout', 'log_period'],
+    chat: ['get_phase', 'get_cycle_overview', 'get_workout_plan', 'get_calorie_target', 'update_profile', 'update_cycle', 'update_health', 'add_task', 'update_task', 'complete_task', 'remove_task', 'remove_log', 'log_mood', 'log_meal', 'log_workout', 'log_period'],
     setup: ['get_cycle_overview', 'update_profile', 'update_cycle', 'update_health', 'finish_setup'],
     // Petal Lens (api/lens.js): one photo of a meal or a workout. It can only propose logs.
     photo: ['get_cycle_overview', 'get_workout_plan', 'get_calorie_target', 'log_meal', 'log_workout'],
@@ -947,12 +998,17 @@
       if (!isISODate(a[k]) || a[k] < addDays(todayIso, from) || a[k] > addDays(todayIso, to)) errors.push(k + ' must be YYYY-MM-DD between ' + addDays(todayIso, from) + ' and ' + addDays(todayIso, to) + '.');
       else out[k] = a[k];
     };
+    const id = (k) => { if (typeof a[k] !== 'string' || !/^[\w-]{1,64}$/.test(a[k])) errors.push(k + ' must be an id from the data.'); else out[k] = a[k]; };
     const L = CYCLE_LIMITS;
     switch (name) {
       case 'get_phase': day('date', -366, 366, true); break;
       case 'get_cycle_overview': case 'get_workout_plan': case 'get_calorie_target': case 'finish_setup': break;
       case 'update_profile':
-        text('displayName', 40); number('age', 12, 70, true); number('heightCm', 100, 230); number('weightKg', 30, 250);
+        text('displayName', 40); number('heightCm', 100, 230); number('weightKg', 30, 250);
+        if (has('birthDate')) {
+          const age = ageOn(a.birthDate, todayIso);
+          if (age == null || age < 12 || age > 100) errors.push('birthDate must be YYYY-MM-DD, for someone aged 12 to 100.'); else out.birthDate = a.birthDate;
+        }
         number('activityTier', 1, 4, true); oneOf('occupation', OCCUPATIONS); list('workoutsLiked', WORKOUT_PREFERENCES);
         if (has('isMom')) { if (typeof a.isMom !== 'boolean') errors.push('isMom must be true or false.'); else out.isMom = a.isMom; }
         break;
@@ -973,6 +1029,14 @@
         out.type = TASK_TYPES.includes(a.type) ? a.type : 'work';
         out.effort = TASK_EFFORT.includes(a.effort) ? a.effort : 'medium';
         break;
+      case 'update_task':
+        id('id'); text('title', 120); day('date', -7, 366);
+        if (has('time')) { if (!HHMM_RE.test(a.time)) errors.push('time must be HH:MM, 24 hour.'); else out.time = a.time; }
+        oneOf('type', TASK_TYPES); oneOf('effort', TASK_EFFORT);
+        if (!errors.length && Object.keys(out).length < 2) errors.push('Say what to change: title, date, time, type or effort.');
+        break;
+      case 'complete_task': case 'remove_task': id('id'); break;
+      case 'remove_log': oneOf('kind', ['meal', 'workout', 'mood'], true); id('id'); break;
       case 'log_mood':
         out.moods = pickList(a.moods, Object.keys(MOODS));
         if (!out.moods.length) errors.push('moods must use: ' + Object.keys(MOODS).join(', ') + '.');
@@ -1000,6 +1064,18 @@
     if (tool.kind === 'action' && !['finish_setup', 'log_mood'].includes(name) && !Object.keys(out).length) return { ok: false, error: 'Nothing to change.' };
     return { ok: true, name, args: out, write: tool.kind === 'action' };
   }
+
+  /*
+   * For tools that change an existing entry: the entry it names, or null when there is none.
+   * The server checks this against the shared data and the app checks it again before saving.
+   */
+  const LOG_KIND = { meal: 'meals', workout: 'workouts', mood: 'moods' };
+  function findTarget(name, args, state) {
+    const kind = name === 'remove_log' ? LOG_KIND[args.kind] : AGENT_TOOLS[name] && AGENT_TOOLS[name].target;
+    if (!kind) return null;
+    return (state.logs[kind] || []).find((e) => e.id === args.id) || null;
+  }
+  const targetsEntry = (name) => name === 'remove_log' || Boolean(AGENT_TOOLS[name] && AGENT_TOOLS[name].target);
 
   // Runs a read tool on (already sanitised) state. Pure, so the server and tests share it.
   function runReadTool(name, args, state, todayIso) {
@@ -1283,6 +1359,25 @@
       },
 
       /* generic */
+      // Changes a task: any of title, dueAt, type, effort. Status follows the new time, as in moveTask.
+      editTask(id, patch) {
+        const task = state.logs.tasks.find((t) => t.id === id);
+        if (!task) return false;
+        const next = {};
+        if (patch.title) next.title = String(patch.title).trim().slice(0, 200);
+        if (TASK_TYPES.includes(patch.type)) next.type = patch.type;
+        if (TASK_EFFORT.includes(patch.effort)) next.effort = patch.effort;
+        if (patch.dueAt) {
+          const due = new Date(patch.dueAt);
+          if (!Number.isNaN(due.getTime())) {
+            next.dueAt = due.toISOString();
+            next.phaseAtDue = phaseAt(due);
+            if (task.status !== 'done') next.status = due.getTime() < now().getTime() ? 'missed' : 'pending';
+          }
+        }
+        updateLog('tasks', id, next);
+        return true;
+      },
       updateEntry(kind, id, patch) { updateLog(kind, id, patch); },
       removeEntry(kind, id) {
         set(Object.assign({}, state, { logs: Object.assign({}, state.logs, { [kind]: state.logs[kind].filter((e) => e.id !== id) }) }));
@@ -1396,5 +1491,8 @@
     setupComplete, setupStepAllowed,
     // assistant
     ASSISTANT_DEFAULTS, AGENT_TOOLS, AGENT_MODES, buildAssistantContext, assistantSnapshot, setupStatus, validateToolCall, runReadTool, safeParse,
+    findTarget, targetsEntry,
+    // profile
+    ageOn, AVATAR_COLORS, AVATAR_EMOJIS, normalizeAvatar,
   };
 });
