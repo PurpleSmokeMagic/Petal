@@ -18,7 +18,7 @@ person ──> browser tab (Petal) ──> localStorage "petal.state.v1"   (all 
                     └──> /api/agent on the same site (only after the person agrees)
                          gets: cycle data, plus only what Privacy settings allow, and the chat
                          never: name, username, ids (in setup mode, the name only if they type it)
-                         └──> Groq, United States (llama-3.3-70b-versatile)
+                         └──> Groq, United States (model picked on the server)
                               the key stays in the function (Vercel environment variable)
 ```
 
@@ -45,7 +45,7 @@ Trust boundaries:
 | 10 | Agent key, consent and abuse. | S, I, D, E. A01, A02, A10, LLM02, LLM06, LLM10 | Key only in a Vercel environment variable. Consent screen names Groq and its country before anything is sent. The endpoint fixes the instructions, model and tools, rebuilds messages from `user` and `assistant` text only, sanitises the snapshot with `migrate()`, checks `Origin`, sizes and the date, rate limits each address, calls one fixed URL and logs nothing. |
 | 11 | The first version of the function cancelled its own model call. It listened for the request's `close` event, which fires once the body is read. | D | Listens on the response instead. Found in end to end testing. |
 
-Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop and endpoint with a scripted model). 41 passing.
+Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop and endpoint with a scripted model). 42 passing.
 
 ## STRIDE
 
@@ -87,7 +87,7 @@ Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/a
 |------|--------|
 | LLM01 Prompt injection | Logged text sits inside a `<user_data>` fence it cannot close. The real controls: narrow tools, validation on both sides, and a tap on Save for every change. **Residual:** injected text can still change the wording of advice or the values in a proposed change, which the person sees before saving. |
 | LLM02 Sensitive information disclosure | Consent screen, category toggles, no names or ids, nothing stored. |
-| LLM03 Supply chain | The model is fixed on the server (`GROQ_MODEL`, default `llama-3.3-70b-versatile`). |
+| LLM03 Supply chain | The model is chosen on the server, never by the client: `GROQ_MODEL` if set, otherwise the first model in `MODEL_PREFERENCE` (`api/agent.js`) that the key can use. Groq retires models, so the list is checked hourly and again after a `model_not_found` error. |
 | LLM04 Data and model poisoning | No training or fine tuning. Not applicable. |
 | LLM05 Improper output handling | Model text is escaped before rendering. Tool arguments are validated twice. Model output never becomes HTML, URLs or code. |
 | LLM06 Excessive agency | Fixed tool list per mode. Writes only after a tap. No delete, no settings, no network, no consent changes. |

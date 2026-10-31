@@ -9,7 +9,7 @@ Petal today is a single-page app with no server. These are the milestones refere
 - The Petal agent (server side, Groq as the model): consent screen, sharing per category, read tools on the server, every change confirmed with Save, setup by chat
 - Setup steps that cannot be skipped, and a logo screen on open
 - Security pass: CSP with hashed scripts, input and import validation, CSV formula protection
-- 41 unit tests, Vercel deployment with security headers
+- 42 unit tests, Vercel deployment with security headers
 
 ## Milestone 1: accounts and storage
 

@@ -6,14 +6,14 @@ Sources: `agent/petal-agent.js` (instructions and loop), `api/agent.js` (endpoin
 ## How it runs
 
 ```
-app (browser) ──POST /api/agent──> Petal agent (Vercel function) ──> Groq (llama-3.3-70b-versatile, United States)
+app (browser) ──POST /api/agent──> Petal agent (Vercel function) ──> Groq (model picked on the server, United States)
    │  consented snapshot + chat           │ instructions, tools, loop          │ writes text, picks tools
    │                                      │ read tools run here                │ never touches data
    <──── streamed text + proposed changes ┘
    person taps Save -> validated again -> saved in the browser
 ```
 
-- The agent is Petal's: its instructions, tools and loop live in this repository. Groq is only the language model behind it, and can be swapped with `GROQ_MODEL` or by changing `createGroqLLM()`.
+- The agent is Petal's: its instructions, tools and loop live in this repository. Groq is only the language model behind it, and can be swapped with `GROQ_MODEL` or by changing `createGroqLLM()`. Without `GROQ_MODEL`, the endpoint asks Groq which models the key can use and takes the first from `MODEL_PREFERENCE` in `api/agent.js` (GPT-OSS 120B first), so a retired model does not break the agent.
 - The key is a Vercel environment variable (`GROQ_API_KEY`). The browser never sees it.
 - Nothing is sent before the person taps **Agree and continue** on a screen that names Groq and its country (`settings.assistant.consent`). They can withdraw in chat options or Privacy settings.
 - Free for everyone while Petal is being tested.

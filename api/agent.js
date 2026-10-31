@@ -10,12 +10,32 @@
  *
  * Every request is untrusted: the snapshot goes through Petal.migrate(), messages are rebuilt
  * from known fields, and the agent's instructions, model and tools are fixed here.
- * Nothing is logged or stored. Environment: GROQ_API_KEY (required), GROQ_MODEL (optional).
+ * Nothing is logged or stored. Environment: GROQ_API_KEY (required), GROQ_MODEL (optional; otherwise
+ * the best available model from MODEL_PREFERENCE is picked, so a retired model does not break the agent).
  */
 const P = require('../src/petal-engine.js');
 const { runAgent, createGroqLLM } = require('../agent/petal-agent.js');
 
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+// Models that follow instructions and call tools well, best first. Groq retires models over time,
+// so the endpoint asks which ones the key can use and takes the first match.
+const MODEL_PREFERENCE = [
+  'openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct-0905', 'moonshotai/kimi-k2-instruct',
+  'meta-llama/llama-4-maverick-17b-128e-instruct', 'llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct',
+  'openai/gpt-oss-20b', 'llama-3.1-8b-instant',
+];
+let modelChoice = null; // cached per instance: { at, id }
+async function pickModel(key) {
+  if (process.env.GROQ_MODEL) return process.env.GROQ_MODEL;
+  if (modelChoice && Date.now() - modelChoice.at < 3600000) return modelChoice.id;
+  let ids = [];
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + key } });
+    if (res.ok) ids = ((await res.json()).data || []).map((m) => String(m.id));
+  } catch (e) { /* fall back to the first preference */ }
+  const id = MODEL_PREFERENCE.find((m) => ids.includes(m)) || MODEL_PREFERENCE[0];
+  modelChoice = { at: Date.now(), id };
+  return id;
+}
 const LIMITS = { bodyBytes: 96000, messages: 16, messageChars: 2000, perMinute: 10 };
 const DAY_MS = 86400000;
 
@@ -102,7 +122,7 @@ module.exports = async function handler(req, res) {
   const send = (event) => res.write('data: ' + JSON.stringify(event) + '\n\n');
   try {
     await runAgent({
-      llm: createGroqLLM({ key, model: process.env.GROQ_MODEL || DEFAULT_MODEL }),
+      llm: createGroqLLM({ key, model: await pickModel(key) }),
       mode, today: body.today, state, setup: cleanSetup(body.snapshot && body.snapshot.setup), messages,
       onEvent: send, signal: ctrl.signal,
     });
@@ -110,6 +130,7 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     // Never pass Groq's error text on (it can echo the request).
     // Never pass the provider's message text on (it can echo the request); its status and short code are safe.
+    if (e && e.reason === 'model_not_found') modelChoice = null; // pick again next time
     if (!ctrl.signal.aborted) {
       send({ type: 'error', code: e && e.status === 429 ? 'rate_limited' : 'upstream', status: e && e.status ? Number(e.status) : undefined, reason: e && e.reason });
     }

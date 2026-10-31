@@ -26,7 +26,7 @@ Period trackers predict *when* a period comes. Nothing helps women plan their wo
 | **Workouts** | Weights, pilates and yoga, and running, with phase-matched picks and safety notes. For example, the run pace is eased when you log fatigue or are in the luteal phase. |
 | **Mood log** | Log moods and see patterns by day, month and cycle phase. |
 | **Goals and productivity trends** | Productivity by day of the week and by phase, so you can see your own pattern. |
-| **Petal agent** | Petal's own agent: its instructions, tools and reasoning loop run on Petal's server, with Groq's Llama 3.3 70B as the language model. It looks up your phase, next period, training plan and calorie target, and proposes changes to your profile, cycle, diet, tasks, moods, meals, workouts and periods. Each change shows a Save button. |
+| **Petal agent** | Petal's own agent: its instructions, tools and reasoning loop run on Petal's server, with a Groq hosted open model (GPT-OSS 120B when available) as the language model. It looks up your phase, next period, training plan and calorie target, and proposes changes to your profile, cycle, diet, tasks, moods, meals, workouts and periods. Each change shows a Save button. |
 | **Export** | CSV and JSON export of your data. |
 
 ## Privacy by design
@@ -51,7 +51,7 @@ Requirements: Node 18+ (for tests and build) and Python 3 (or any static server)
 git clone https://github.com/PurpleSmokeMagic/Petal.git
 cd Petal
 python -m http.server 5173 --bind 127.0.0.1    # open http://127.0.0.1:5173
-node --test test/*.test.js                       # 41 tests
+node --test test/*.test.js                       # 42 tests
 node build.js                                    # writes dist/index.html, one self-contained file
 ```
 
@@ -68,7 +68,7 @@ src/assistant.js         agent client: talks to /api/agent, streams text and pro
 src/app.js               UI: screens and hash routes
 agent/petal-agent.js     the Petal agent: instructions, setup and chat modes, tool loop, Groq connector
 api/agent.js             Vercel server function: checks requests, holds the key, runs the agent, streams events
-test/                    41 unit tests (node:test): engine, agent loop and endpoint
+test/                    42 unit tests (node:test): engine, agent loop and endpoint
 build.js                 inlines everything into one file and hashes scripts for the CSP
 vercel.json              Vercel build and security headers
 docs/                    engine, data model, assistant rules, entitlements, screens, roadmap
@@ -92,7 +92,7 @@ docs/                    engine, data model, assistant rules, entitlements, scre
 
 ## Tech stack
 
-Vanilla JavaScript (no framework, no runtime dependencies), HTML, CSS · Node.js (build and `node:test`) · Vercel (static hosting, one server function, security headers) · Groq (Llama 3.3 70B, the language model behind the Petal agent) · AI tools used to build it: Claude (Anthropic) and Gemini (Google) for design, code, tests and the security review.
+Vanilla JavaScript (no framework, no runtime dependencies), HTML, CSS · Node.js (build and `node:test`) · Vercel (static hosting, one server function, security headers) · Groq (open models such as GPT-OSS 120B, the language model behind the Petal agent) · AI tools used to build it: Claude (Anthropic) and Gemini (Google) for design, code, tests and the security review.
 
 ## Honest status
 

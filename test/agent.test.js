@@ -98,6 +98,8 @@ let upstream = [];
 function stubGroq(status = 200) {
   upstream = [];
   global.fetch = async (url, opts) => {
+    // The model list: the endpoint picks the first preferred model this key can use.
+    if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'whisper-large-v3' }, { id: 'llama-3.1-8b-instant' }, { id: 'openai/gpt-oss-120b' }] }) };
     upstream.push({ url, body: JSON.parse(opts.body), auth: opts.headers.Authorization });
     async function* body() { yield Buffer.from('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\ndata: [DONE]\n\n'); }
     return { ok: status === 200, status, body: body() };
@@ -140,7 +142,7 @@ test('endpoint: runs the agent with its own prompt, model and tools, and streams
   const sent = upstream[0];
   assert.equal(sent.url, 'https://api.groq.com/openai/v1/chat/completions');
   assert.equal(sent.auth, 'Bearer gsk_secret');
-  assert.equal(sent.body.model, 'llama-3.3-70b-versatile');
+  assert.equal(sent.body.model, 'openai/gpt-oss-120b', 'the client cannot pick the model; the server picks from what the key offers');
   assert.ok(sent.body.tools.every((t) => Petal.AGENT_MODES.chat.includes(t.function.name)));
   assert.match(sent.body.messages[0].content, /^You are Petal/);
   assert.doesNotMatch(JSON.stringify(sent.body), /Sarah|be evil/);
