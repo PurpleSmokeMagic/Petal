@@ -10,7 +10,7 @@ Petal today is a single-page app with no server. These are the milestones refere
 - Setup steps that cannot be skipped, and a logo screen on open
 - Security pass: CSP with hashed scripts, input and import validation, CSV formula protection
 - Petal Lens, a photo agent for meals and workouts
-- 46 unit tests, Vercel deployment with security headers
+- 47 unit tests, Vercel deployment with security headers
 
 ## Milestone 1: accounts and storage
 

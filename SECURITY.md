@@ -52,7 +52,7 @@ Trust boundaries:
 
 | 12 | Petal Lens (new): photos are personal and can carry location, faces or bodies. | I, T, D, E. A03, A10, LLM01, LLM02, LLM05 | Photos are resized on the phone and re-encoded, which drops EXIF location. The endpoint accepts only image data (never a URL, so no server side fetch), checks the declared type against the file's signature bytes, caps size and rate, and logs nothing. Lens instructions forbid body, weight and looks comments and identifying people, and treat text inside a photo as data. Lens can only propose meal and workout logs. The consent notice has its own Photos section. |
 
-Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop, both endpoints and Lens, with a scripted model). 46 passing.
+Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop, both endpoints and Lens, with a scripted model). 47 passing.
 
 ## STRIDE
 

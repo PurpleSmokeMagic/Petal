@@ -237,3 +237,16 @@ test('lens: the photo agent can only propose logs', async () => {
   const { events } = await run('photo', [{ calls: [['update_profile', { weightKg: 70 }], ['log_meal', { meal: 'lunch', name: 'Lentil soup', kcal: 350 }]] }, { content: 'Lentil soup.' }]);
   assert.deepEqual(events.filter((e) => e.type === 'action').map((e) => e.name), ['log_meal']);
 });
+
+test('thinking text from a model is never shown, even when the tags are split', async () => {
+  const { createGroqLLM } = require('../agent/petal-agent.js');
+  const chunks = ['<thi', 'nk>plan the answer', ' carefully</thi', 'nk>Lentil', ' soup. <b>', 'ok</b>'];
+  const sse = chunks.map((c) => 'data: ' + JSON.stringify({ choices: [{ delta: { content: c } }] }) + '\n\n').join('') + 'data: [DONE]\n\n';
+  let sentBody;
+  const llm = createGroqLLM({ key: 'k', model: 'qwen/qwen3.8-27b', fetchImpl: async (u, o) => { sentBody = JSON.parse(o.body); async function* b() { yield Buffer.from(sse); } return { ok: true, body: b() }; } });
+  const shown = [];
+  const res = await llm({ messages: [], tools: [], onToken: (t) => shown.push(t) });
+  assert.equal(res.content, 'Lentil soup. <b>ok</b>');
+  assert.equal(shown.join(''), 'Lentil soup. <b>ok</b>');
+  assert.equal(sentBody.reasoning_format, 'hidden');
+});

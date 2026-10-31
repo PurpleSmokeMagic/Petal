@@ -79,7 +79,9 @@ function createGroqLLM({ key, model, fetchImpl }) {
     const res = await doFetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, tools, tool_choice: toolChoice || 'auto', stream: true, max_tokens: LIMITS.maxTokens, temperature: 0.4 }),
+      // Qwen models can think out loud; ask Groq to keep that out of the answer.
+      body: JSON.stringify(Object.assign({ model, messages, tools, tool_choice: toolChoice || 'auto', stream: true, max_tokens: LIMITS.maxTokens, temperature: 0.4 },
+        /qwen/i.test(model) ? { reasoning_format: 'hidden' } : {})),
       signal,
     });
     if (!res.ok || !res.body) {
@@ -91,6 +93,32 @@ function createGroqLLM({ key, model, fetchImpl }) {
     }
     let content = '';
     const calls = [];
+    // Backup for models that still stream <think>...</think>: drop it, even when a tag is split across chunks.
+    let thinking = false;
+    let held = '';
+    const hideThinking = (piece) => {
+      let s = held + piece;
+      held = '';
+      let out = '';
+      for (;;) {
+        if (thinking) {
+          const end = s.indexOf('</think>');
+          if (end < 0) { held = s.slice(-7); return out; }
+          s = s.slice(end + 8);
+          thinking = false;
+        } else {
+          const start = s.indexOf('<think>');
+          if (start < 0) {
+            const cut = s.lastIndexOf('<');
+            if (cut >= 0 && '<think>'.startsWith(s.slice(cut))) { held = s.slice(cut); return out + s.slice(0, cut); }
+            return out + s;
+          }
+          out += s.slice(0, start);
+          s = s.slice(start + 7);
+          thinking = true;
+        }
+      }
+    };
     let buf = '';
     const dec = new TextDecoder();
     for await (const chunk of res.body) {
@@ -105,7 +133,7 @@ function createGroqLLM({ key, model, fetchImpl }) {
         let delta;
         try { delta = JSON.parse(data).choices[0].delta; } catch (e) { continue; }
         if (!delta) continue;
-        if (delta.content) { content += delta.content; if (onToken) onToken(delta.content); }
+        if (delta.content) { const visible = hideThinking(delta.content); if (visible) { content += visible; if (onToken) onToken(visible); } }
         (delta.tool_calls || []).forEach((tc, n) => {
           const k = tc.index != null ? tc.index : n;
           const c = calls[k] || (calls[k] = { id: tc.id || 'call_' + k, name: '', arguments: '' });

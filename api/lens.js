@@ -16,8 +16,8 @@ const S = require('../agent/server.js');
 
 // Groq models that can see images, best first. Any other id that looks like a vision model is the fallback.
 const pickModel = S.createModelPicker({
-  preference: ['meta-llama/llama-4-maverick-17b-128e-instruct', 'meta-llama/llama-4-scout-17b-16e-instruct'],
-  fallback: /llama-4|vision|maverick|scout|-vl\b|-vl-/i,
+  preference: ['qwen/qwen3.8-27b', 'meta-llama/llama-4-maverick-17b-128e-instruct', 'meta-llama/llama-4-scout-17b-16e-instruct'],
+  fallback: /qwen3\.\d+-\d+b|llama-4|vision|maverick|scout|-vl\b|-vl-/i,
   envVar: 'GROQ_VISION_MODEL',
 });
 const LIMITS = { imageChars: 1400000, bodyBytes: 1500000, noteChars: 500, perMinute: 5 };
