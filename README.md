@@ -26,6 +26,7 @@ Period trackers predict *when* a period comes. Nothing helps women plan their wo
 | **Workouts** | Weights, pilates and yoga, and running, with phase-matched picks and safety notes. For example, the run pace is eased when you log fatigue or are in the luteal phase. |
 | **Mood log** | Log moods and see patterns by day, month and cycle phase. |
 | **Goals and productivity trends** | Productivity by day of the week and by phase, so you can see your own pattern. |
+| **Petal Lens** | A second agent for photos. Snap a meal or a workout and Lens says what it sees, comments for your phase and diet, gives one recommendation and offers to log it. Photos are shrunk on the phone with location removed, and never saved. |
 | **Petal agent** | Petal's own agent: its instructions, tools and reasoning loop run on Petal's server, with a Groq hosted open model (GPT-OSS 120B when available) as the language model. It looks up your phase, next period, training plan and calorie target, and proposes changes to your profile, cycle, diet, tasks, moods, meals, workouts and periods. Each change shows a Save button. |
 | **Export** | CSV and JSON export of your data. |
 
@@ -51,7 +52,7 @@ Requirements: Node 18+ (for tests and build) and Python 3 (or any static server)
 git clone https://github.com/PurpleSmokeMagic/Petal.git
 cd Petal
 python -m http.server 5173 --bind 127.0.0.1    # open http://127.0.0.1:5173
-node --test test/*.test.js                       # 42 tests
+node --test test/*.test.js                       # 46 tests
 node build.js                                    # writes dist/index.html, one self-contained file
 ```
 
@@ -67,8 +68,10 @@ src/exercise-catalog.js  exercises with phase guidance
 src/assistant.js         agent client: talks to /api/agent, streams text and proposed changes
 src/app.js               UI: screens and hash routes
 agent/petal-agent.js     the Petal agent: instructions, setup and chat modes, tool loop, Groq connector
+agent/server.js          shared request checks: origin, rate limit, date, model picking, event streaming
 api/agent.js             Vercel server function: checks requests, holds the key, runs the agent, streams events
-test/                    42 unit tests (node:test): engine, agent loop and endpoint
+api/lens.js              Petal Lens: the photo agent's endpoint, strict image checks, a Groq vision model
+test/                    46 unit tests (node:test): engine, agent loop, both endpoints and Lens
 build.js                 inlines everything into one file and hashes scripts for the CSP
 vercel.json              Vercel build and security headers
 docs/                    engine, data model, assistant rules, entitlements, screens, roadmap

@@ -5,7 +5,7 @@
  *   POST /api/agent  { mode, today, snapshot, messages } -> server sent events:
  *          data: { "type": "token", "text": "..." }      streamed answer text
  *          data: { "type": "action", "name", "args" }    a change for the person to Save
- *          data: { "type": "error", "code" }             then the stream ends
+ *          data: { "type": "error", "code", "status", "reason" }   then the stream ends
  *          data: { "type": "done" }
  *
  * Every request is untrusted: the snapshot goes through Petal.migrate(), messages are rebuilt
@@ -15,65 +15,17 @@
  */
 const P = require('../src/petal-engine.js');
 const { runAgent, createGroqLLM } = require('../agent/petal-agent.js');
+const S = require('../agent/server.js');
 
-// Models that follow instructions and call tools well, best first. Groq retires models over time,
-// so the endpoint asks which ones the key can use and takes the first match.
+// Models that follow instructions and call tools well, best first.
 const MODEL_PREFERENCE = [
   'openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct-0905', 'moonshotai/kimi-k2-instruct',
   'meta-llama/llama-4-maverick-17b-128e-instruct', 'llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct',
   'openai/gpt-oss-20b', 'llama-3.1-8b-instant',
 ];
-let modelChoice = null; // cached per instance: { at, id }
-async function pickModel(key) {
-  if (process.env.GROQ_MODEL) return process.env.GROQ_MODEL;
-  if (modelChoice && Date.now() - modelChoice.at < 3600000) return modelChoice.id;
-  let ids = [];
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + key } });
-    if (res.ok) ids = ((await res.json()).data || []).map((m) => String(m.id));
-  } catch (e) { /* fall back to the first preference */ }
-  const id = MODEL_PREFERENCE.find((m) => ids.includes(m)) || MODEL_PREFERENCE[0];
-  modelChoice = { at: Date.now(), id };
-  return id;
-}
+const pickModel = S.createModelPicker({ preference: MODEL_PREFERENCE, envVar: 'GROQ_MODEL' });
 const LIMITS = { bodyBytes: 96000, messages: 16, messageChars: 2000, perMinute: 10 };
-const DAY_MS = 86400000;
-
-// Best effort per instance limit. Serverless instances do not share memory, and Groq's own
-// free tier limits sit behind this, so a burst can only use up the free quota, never cost money.
-const hits = new Map();
-function limited(ip, now) {
-  const recent = (hits.get(ip) || []).filter((t) => now - t < 60000);
-  recent.push(now);
-  hits.set(ip, recent);
-  if (hits.size > 5000) hits.clear();
-  return recent.length > LIMITS.perMinute;
-}
-
-// Only pages served from this deployment may call it from a browser.
-function sameOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return false;
-  try {
-    return new URL(origin).host === (req.headers['x-forwarded-host'] || req.headers.host);
-  } catch (e) {
-    return false;
-  }
-}
-
-function json(res, status, body) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify(body));
-}
-
-// The person's local date, which may differ from the server's by a day across time zones.
-function validToday(today, now) {
-  if (!P.isISODate(today)) return false;
-  const t = Date.parse(today + 'T12:00:00Z');
-  return Math.abs(t - now) <= 1.5 * DAY_MS;
-}
+const limited = S.createRateLimiter(LIMITS.perMinute);
 
 function cleanMessages(list) {
   if (!Array.isArray(list) || !list.length || list.length > LIMITS.messages) return null;
@@ -94,49 +46,26 @@ function cleanSetup(s) {
 
 module.exports = async function handler(req, res) {
   const key = process.env.GROQ_API_KEY;
-  if (req.method === 'GET') return json(res, 200, { available: Boolean(key) });
-  if (req.method !== 'POST') { res.setHeader('Allow', 'GET, POST'); return json(res, 405, { error: 'method' }); }
-  if (!key) return json(res, 503, { error: 'not_configured' });
-  if (!sameOrigin(req)) return json(res, 403, { error: 'origin' });
-  const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
-  if (limited(ip, Date.now())) return json(res, 429, { error: 'rate_limited' });
+  if (req.method === 'GET') return S.json(res, 200, { available: Boolean(key) });
+  if (req.method !== 'POST') { res.setHeader('Allow', 'GET, POST'); return S.json(res, 405, { error: 'method' }); }
+  if (!key) return S.json(res, 503, { error: 'not_configured' });
+  if (!S.sameOrigin(req)) return S.json(res, 403, { error: 'origin' });
+  if (limited(S.clientIp(req), Date.now())) return S.json(res, 429, { error: 'rate_limited' });
 
-  let body = req.body;
-  if (typeof body === 'string') { try { body = P.safeParse(body); } catch (e) { body = null; } }
-  if (!body || typeof body !== 'object' || JSON.stringify(body).length > LIMITS.bodyBytes) return json(res, 400, { error: 'body' });
+  const body = S.parseBody(req, LIMITS.bodyBytes);
+  if (!body) return S.json(res, 400, { error: 'body' });
   const mode = body.mode === 'setup' ? 'setup' : 'chat';
-  if (!validToday(body.today, Date.now())) return json(res, 400, { error: 'today' });
+  if (!S.validToday(body.today, Date.now())) return S.json(res, 400, { error: 'today' });
   const messages = cleanMessages(body.messages);
-  if (!messages) return json(res, 400, { error: 'messages' });
+  if (!messages) return S.json(res, 400, { error: 'messages' });
   let state;
-  try { state = P.migrate(P.safeParse(JSON.stringify(body.snapshot || {}))); } catch (e) { return json(res, 400, { error: 'snapshot' }); }
+  try { state = P.migrate(P.safeParse(JSON.stringify(body.snapshot || {}))); } catch (e) { return S.json(res, 400, { error: 'snapshot' }); }
 
-  // Stop the model call if the browser goes away. The request's own 'close' fires as soon as
-  // its body is read, so listen on the response, which closes on disconnect or after end().
-  const ctrl = new AbortController();
-  if (res.on) res.on('close', () => ctrl.abort());
-
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-store');
-  const send = (event) => res.write('data: ' + JSON.stringify(event) + '\n\n');
-  try {
-    await runAgent({
-      llm: createGroqLLM({ key, model: await pickModel(key) }),
-      mode, today: body.today, state, setup: cleanSetup(body.snapshot && body.snapshot.setup), messages,
-      onEvent: send, signal: ctrl.signal,
-    });
-    send({ type: 'done' });
-  } catch (e) {
-    // Never pass Groq's error text on (it can echo the request).
-    // Never pass the provider's message text on (it can echo the request); its status and short code are safe.
-    if (e && e.reason === 'model_not_found') modelChoice = null; // pick again next time
-    if (!ctrl.signal.aborted) {
-      send({ type: 'error', code: e && e.status === 429 ? 'rate_limited' : 'upstream', status: e && e.status ? Number(e.status) : undefined, reason: e && e.reason });
-    }
-  }
-  res.end();
+  await S.streamEvents(res, async (send, signal) => runAgent({
+    llm: createGroqLLM({ key, model: await pickModel(key) }),
+    mode, today: body.today, state, setup: cleanSetup(body.snapshot && body.snapshot.setup), messages,
+    onEvent: send, signal,
+  }), pickModel.reset);
 };
 
 module.exports.cleanMessages = cleanMessages;
-module.exports.validToday = validToday;

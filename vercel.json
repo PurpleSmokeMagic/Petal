@@ -8,6 +8,9 @@
   "functions": {
     "api/agent.js": {
       "maxDuration": 60
+    },
+    "api/lens.js": {
+      "maxDuration": 60
     }
   },
   "headers": [

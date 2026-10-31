@@ -904,6 +904,8 @@
   const AGENT_MODES = {
     chat: ['get_phase', 'get_cycle_overview', 'get_workout_plan', 'get_calorie_target', 'update_profile', 'update_cycle', 'update_health', 'add_task', 'log_mood', 'log_meal', 'log_workout', 'log_period'],
     setup: ['get_cycle_overview', 'update_profile', 'update_cycle', 'update_health', 'finish_setup'],
+    // Petal Lens (api/lens.js): one photo of a meal or a workout. It can only propose logs.
+    photo: ['get_cycle_overview', 'get_workout_plan', 'get_calorie_target', 'log_meal', 'log_workout'],
   };
 
   /*

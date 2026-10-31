@@ -149,6 +149,7 @@
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17v.5"/>',
     card: '<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/>',
     briefcase: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M9 7V5h6v2M3 12h18"/>',
+    camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
     book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
     home: '<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>',
   };
@@ -495,7 +496,8 @@
       '<div class="qcircles" style="margin-top: 16px">' +
       '<button class="qcircle" data-act="workout-tip" aria-label="Workouts, with a recommendation for today"><span class="dot">' + svg('dumbbell') + '</span>Workout</button>' +
       '<button class="qcircle" data-act="new-task" aria-label="Add an event"><span class="dot">' + svg('cal') + '</span>Event</button>' +
-      '<button class="qcircle" data-act="go" data-to="#/mood/new" aria-label="Log your mood"><span class="dot">' + svg('face') + '</span>Mood</button></div>' +
+      '<button class="qcircle" data-act="go" data-to="#/mood/new" aria-label="Log your mood"><span class="dot">' + svg('face') + '</span>Mood</button>' +
+      '<button class="qcircle" data-act="photo-pick" aria-label="Share a photo of a meal or workout with Petal"><span class="dot">' + svg('camera') + '</span>Photo</button></div>' +
       '<section class="hero" style="margin-top: 16px" aria-label="Calories and macros">' +
       '<div style="display: flex; align-items: center; justify-content: space-between"><div style="display: flex; align-items: center; gap: 8px">' + (info ? phaseChip(info) + '<span class="t-cap">Day ' + info.cycleDay + '</span>' : '<span class="t-cap">' + esc(fmtLong(t)) + '</span>') + '</div>' +
       (radial ? '<span style="width:44px;height:44px"></span>' : '<button class="addbtn" data-act="open" data-type="radial" aria-label="Add meal">' + svg('plus') + '</button>') + '</div>' +
@@ -1511,6 +1513,8 @@
     render();
     chat.status = (await A.available()) ? 'ready' : 'unavailable';
     render();
+    // A photo picked before this check finished goes out now, if the person already agreed.
+    if (pendingPhoto && chat.status === 'ready' && store.getState().settings.assistant.consent) { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); }
   }
 
   function contextChips(state, ctx) {
@@ -1615,7 +1619,10 @@
   }
 
   function chatBubble(m, mi) {
-    if (m.role === 'user') return '<div class="pt-msg pt-msg-user" style="overflow-wrap: anywhere">' + esc(m.text) + '</div>';
+    if (m.role === 'user') {
+      return '<div class="pt-msg pt-msg-user" style="overflow-wrap: anywhere' + (m.image ? '; padding: 6px; display: flex; flex-direction: column; gap: 6px' : '') + '">' +
+        (m.image ? '<img class="msg-photo" src="' + esc(m.image) + '" alt="Your photo">' : '') + (m.text ? '<span' + (m.image ? ' style="padding: 0 8px 4px"' : '') + '>' + esc(m.text) + '</span>' : '') + '</div>';
+    }
     if (m.error) return '<div class="pt-msg pt-msg-ai" role="alert" style="display: flex; flex-direction: column; gap: 8px"><span>' + esc(m.error) + '</span></div>';
     const streaming = chat.busy && mi === chat.threads[chat.mode].length - 1;
     const body = streaming ? '<span data-stream style="white-space: pre-wrap">' + esc(m.text || 'Thinking') + '</span>' : renderModelText(m.text);
@@ -1639,7 +1646,7 @@
     if (!store.getState().settings.assistant.consent) {
       return card('<b class="t-head">Before we chat</b>' +
         '<span class="t-sub" style="margin: 0">Petal\'s assistant runs online. To answer you, Petal sends ' +
-        (mode === 'setup' ? 'what you type here, including your name, and which setup questions are already answered' : 'your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent. This goes') +
+        (mode === 'setup' ? 'what you type here, including your name, and which setup questions are already answered' : 'your message or photo, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent. This goes') +
         ' to an external AI provider that processes it for Petal on servers in the United States, only to answer you. Petal does not store your chats.</span>' +
         '<button class="linkbtn" data-act="open" data-type="ai-notice" style="align-self: flex-start; padding: 0">How your data is used</button>' +
         '<span class="t-cap">' + (mode === 'setup' ? 'You can switch to the forms at any time.' : 'You can stop any time in chat options or Privacy settings.') + '</span>' +
@@ -1651,7 +1658,9 @@
 
   function chatDock(placeholder, suggestions) {
     return '<div class="chat-dock' + (chat.mode === 'setup' ? ' no-tabs' : '') + '">' + (suggestions ? '<div class="chips" style="gap: 6px">' + suggestions.map((s) => '<button class="opt" data-act="chat-suggest" data-value="' + esc(s) + '" style="height: 40px; font-size: 13px">' + esc(s) + '</button>').join('') + '</div>' : '') +
-      '<form class="pt-compose" data-form="chat" style="padding-left: 4px"><label for="chat-q" class="sr-only">Message</label><input id="chat-q" name="q" class="chat-inp" autocomplete="off" maxlength="1000" placeholder="' + placeholder + '"' + (chat.busy ? ' disabled' : '') + '>' +
+      '<form class="pt-compose" data-form="chat" style="padding-left: 4px">' +
+      (chat.mode === 'chat' ? '<button type="button" class="cam-btn" data-act="photo-pick" aria-label="Share a photo of a meal or workout"' + (chat.busy ? ' disabled' : '') + '>' + svg('camera') + '</button>' : '') +
+      '<label for="chat-q" class="sr-only">Message</label><input id="chat-q" name="q" class="chat-inp" autocomplete="off" maxlength="1000" placeholder="' + placeholder + '"' + (chat.busy ? ' disabled' : '') + '>' +
       (chat.busy ? '<button type="button" class="pt-send" data-act="chat-stop" aria-label="Stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>'
         : '<button type="submit" class="pt-send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>') + '</form></div>';
   }
@@ -1672,7 +1681,7 @@
     return '<div class="ph has-tabs chat-page">' + top +
       '<div class="chips" style="margin-top: 16px; gap: 6px">' + chips + '</div>' +
       '<div class="chat" style="margin-top: 16px" aria-live="polite">' + intro + thread.map(chatBubble).join('') + '</div>' +
-      chatDock('Ask about your cycle', thread.length ? null : SUGGESTIONS) + tabs('assistant') + '</div>';
+      chatDock('Ask, or share a photo', thread.length ? null : SUGGESTIONS) + tabs('assistant') + '</div>';
   }
 
   function setupChatScreen() {
@@ -1691,6 +1700,7 @@
   const AI_NOTICE = [
     ['Who processes it', 'An external AI provider generates the answers on Petal\'s behalf. It may only use your data to answer you.'],
     ['What is sent', 'Your message and earlier messages in the same chat, your cycle day, phase and period dates, and only the categories you turn on in Privacy settings. Your name, username and ids are never sent, unless you type your name while setting up by chat.'],
+    ['Photos', 'Only photos you choose to share. Petal shrinks each photo on your phone and removes its location and camera details before sending it. Photos are used once to answer you and are not saved by Petal. Avoid photos that show faces or other people.'],
     ['Where', 'The provider\'s servers are in the United States, so your data leaves your country to be processed.'],
     ['Why, and on what basis', 'Only to answer you and to suggest changes that you choose to save. Because this is health data, Petal asks for your explicit consent first.'],
     ['How long', 'Petal does not store your chats. They disappear when you reload. The provider may keep requests for a limited time under its own terms, for example to prevent abuse.'],
@@ -1710,6 +1720,89 @@
       '<button type="button" class="pt-btn pt-btn-secondary block" data-act="chat-clear">Clear chat</button>' +
       '<button type="button" class="pt-btn pt-btn-text block" data-act="agent-withdraw">Stop using the assistant</button>' +
       '<p class="t-cap">Chats stay in this tab only and clear when you reload. Petal does not store them. Stopping withdraws your agreement, and the assistant asks again before the next chat.</p></div></section>';
+  }
+
+  // Error text for a failed agent or Lens request.
+  function agentErrorText(e, stopped) {
+    if (stopped) return 'Stopped. The answer took too long or you stopped it.';
+    if (e && (e.status === 429 || e.code === 'rate_limited')) return 'The assistant is busy. Wait a minute, then try again.';
+    if (e && e.status === 503) return 'The assistant is not set up on this site yet.';
+    if (e && e.status === 413) return 'That photo is too large. Try another one.';
+    if (e && e.message === 'not_image') return 'That file is not a photo Petal can read.';
+    return 'I could not reach the assistant. Check your connection, then try again.';
+  }
+
+  /*
+   * Petal Lens: one photo of a meal or a workout. The photo is resized on the phone (location and
+   * camera details removed), sent once to /api/lens, shown in this chat, and never saved.
+   */
+  let pendingPhoto = null; // a photo picked before the person agreed to the assistant
+  async function sendPhotoToLens(file) {
+    if (chat.busy) return;
+    chat.mode = 'chat';
+    const q = document.getElementById('chat-q');
+    const note = q ? q.value.trim().slice(0, 500) : '';
+    if (q) q.value = '';
+    const thread = chat.threads.chat;
+    const history = chat.history.chat;
+    const state = store.getState();
+    const todayIso = P.today(now());
+    const reply = { role: 'ai', text: '', basis: P.buildAssistantContext(state, todayIso).basis, actions: [] };
+    let image;
+    try {
+      image = await A.preparePhoto(file);
+    } catch (e) {
+      thread.push({ role: 'ai', error: agentErrorText(e), basis: [], actions: [] });
+      render();
+      return;
+    }
+    thread.push({ role: 'user', text: note, image });
+    history.push({ role: 'user', content: ('(I shared a photo' + (note ? ': ' + note : '') + ')').slice(0, 2000) });
+    thread.push(reply);
+    chat.busy = true;
+    chat.abort = new AbortController();
+    render();
+    window.scrollTo(0, document.body.scrollHeight);
+    try {
+      await A.sendPhoto({
+        today: todayIso, snapshot: P.assistantSnapshot(state, todayIso, 'chat'), image, note, signal: chat.abort.signal,
+        onToken: (t) => { reply.text = t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = t; },
+        onAction: (name, args) => {
+          const v = P.validateToolCall(name, args, todayIso);
+          if (v.ok && v.write && P.AGENT_MODES.photo.includes(v.name)) { reply.actions.push({ name: v.name, args: v.args, state: 'pending' }); render(); }
+        },
+      });
+      if (!reply.text.trim() && !reply.actions.length) reply.text = 'I could not make out that photo. Try another one, closer and in good light.';
+      const suggested = reply.actions.map((x) => describeAction(x.name, x.args).title);
+      history.push({ role: 'assistant', content: (reply.text + (suggested.length ? '\n(Suggested changes: ' + suggested.join('; ') + ')' : '')).slice(0, 2000) });
+    } catch (e) {
+      history.pop();
+      const stopped = e && e.name === 'AbortError';
+      if (stopped && reply.text) reply.text += ' …';
+      else reply.error = agentErrorText(e, stopped);
+    } finally {
+      chat.busy = false;
+      chat.abort = null;
+      render();
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+  }
+
+  // The file picker lives outside #app (index.html) so re-renders do not remove it.
+  const photoInput = document.getElementById('photo-in');
+  if (photoInput) {
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files && photoInput.files[0];
+      photoInput.value = '';
+      if (!file) return;
+      if (location.hash !== '#/assistant') go('#/assistant');
+      if (!store.getState().settings.assistant.consent || chat.status !== 'ready') {
+        pendingPhoto = file; // sent once the person agrees on the assistant screen
+        render();
+        return;
+      }
+      sendPhotoToLens(file);
+    });
   }
 
   // One turn: send the message, stream the answer, collect proposed changes.
@@ -1903,7 +1996,10 @@
 
     // assistant
     'agent-retry': () => checkAgent(),
-    'agent-agree': () => store.actions.updateAssistant({ consent: true }),
+    'agent-agree': () => {
+      store.actions.updateAssistant({ consent: true });
+      if (pendingPhoto && chat.status === 'ready') { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); }
+    },
     'agent-withdraw': () => {
       if (chat.abort) chat.abort.abort();
       ui.overlay = null;
@@ -1911,6 +2007,7 @@
       toast('The assistant will ask before the next chat');
     },
     'chat-suggest': (d) => { if (!chat.busy) sendToAgent(d.value); },
+    'photo-pick': () => { if (photoInput && !chat.busy) photoInput.click(); },
     'workout-tip': () => { go('#/workout'); startWorkoutTip(); render(); },
     'workout-tip-close': () => { closeWorkoutTip(); render(); },
     'chat-stop': () => { if (chat.abort) chat.abort.abort(); },

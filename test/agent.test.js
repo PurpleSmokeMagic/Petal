@@ -168,3 +168,72 @@ test('endpoint: passes the provider short error code, never its message', async 
   assert.match(r, /"status":400,"reason":"tool_use_failed"/);
   assert.doesNotMatch(r, /echo|gsk_secret|tired/);
 });
+
+/* Petal Lens (photo agent) */
+
+const lens = require('../api/lens.js');
+const jpeg = 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1]).toString('base64');
+const png = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]).toString('base64');
+
+function callLens({ method = 'POST', body, origin = 'https://petal.example', ip = '7.7.7.7' } = {}) {
+  return new Promise((resolve) => {
+    const out = { status: 200, chunks: [] };
+    const req = { method, body, headers: { origin, host: 'petal.example', 'x-forwarded-for': ip } };
+    const res = {
+      set statusCode(v) { out.status = v; },
+      setHeader() {}, on() {},
+      write(c) { out.chunks.push(String(c)); },
+      end(c) { if (c) out.chunks.push(String(c)); resolve(out); },
+    };
+    lens(req, res);
+  });
+}
+
+test('lens: only real photo data is accepted', () => {
+  assert.equal(lens.checkImage(jpeg), true);
+  assert.equal(lens.checkImage(png), true);
+  assert.equal(lens.checkImage('https://example.com/meal.jpg'), false, 'no URLs, so the server never fetches anything');
+  assert.equal(lens.checkImage(png.replace('image/png', 'image/jpeg')), false, 'declared type must match the bytes');
+  assert.equal(lens.checkImage('data:image/svg+xml;base64,PHN2Zz4='), false);
+  assert.equal(lens.checkImage('data:image/jpeg;base64,' + 'A'.repeat(1400001)), false);
+  assert.equal(lens.checkImage(jpeg + '<script>'), false);
+});
+
+test('lens: refuses other origins, bad notes and bad images before reaching the model', async () => {
+  process.env.GROQ_API_KEY = 'gsk_secret';
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 500 }; };
+  const body = { today, image: jpeg };
+  assert.equal((await callLens({ body, origin: 'https://evil.example', ip: '8.1' })).status, 403);
+  assert.equal((await callLens({ body: Object.assign({}, body, { image: 'https://x/y.jpg' }), ip: '8.2' })).status, 400);
+  assert.equal((await callLens({ body: Object.assign({}, body, { note: 'x'.repeat(501) }), ip: '8.3' })).status, 400);
+  assert.equal(calls, 0);
+});
+
+test('lens: sends one photo to a vision model with the Lens instructions and photo tools only', async () => {
+  process.env.GROQ_API_KEY = 'gsk_secret';
+  const sent = [];
+  global.fetch = async (url, opts) => {
+    if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'openai/gpt-oss-120b' }, { id: 'meta-llama/llama-4-scout-17b-16e-instruct' }] }) };
+    sent.push(JSON.parse(opts.body));
+    async function* body() { yield Buffer.from('data: {"choices":[{"delta":{"content":"A bowl of lentil soup."}}]}\n\ndata: [DONE]\n\n'); }
+    return { ok: true, status: 200, body: body() };
+  };
+  const r = await callLens({ body: { today, image: jpeg, note: 'lunch', snapshot: { profile: { displayName: 'Sarah' } } }, ip: '9.9' });
+  assert.match(r.chunks.join(''), /lentil soup/);
+  const b = sent[0];
+  assert.equal(b.model, 'meta-llama/llama-4-scout-17b-16e-instruct', 'a vision model the key can use');
+  assert.deepEqual(b.tools.map((t) => t.function.name), Petal.AGENT_MODES.photo);
+  assert.match(b.messages[0].content, /Petal Lens/);
+  assert.match(b.messages[0].content, /never comment on the body/);
+  const user = b.messages[1].content;
+  assert.deepEqual(user.map((p) => p.type), ['text', 'image_url']);
+  assert.equal(user[0].text, 'My note: lunch');
+  assert.equal(user[1].image_url.url, jpeg);
+  assert.doesNotMatch(JSON.stringify(b), /Sarah/);
+});
+
+test('lens: the photo agent can only propose logs', async () => {
+  const { events } = await run('photo', [{ calls: [['update_profile', { weightKg: 70 }], ['log_meal', { meal: 'lunch', name: 'Lentil soup', kcal: 350 }]] }, { content: 'Lentil soup.' }]);
+  assert.deepEqual(events.filter((e) => e.type === 'action').map((e) => e.name), ['log_meal']);
+});

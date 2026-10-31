@@ -3,7 +3,7 @@
 Reviewed on 31 October 2026 against STRIDE, the OWASP Top 10 (2021) and the OWASP Top 10 for LLM applications (2025), and updated the same day for the Petal agent.
 Scope: everything in this folder. That covers:
 - the single page app (`index.html`, `src/*.js`)
-- the agent (`agent/petal-agent.js`, `api/agent.js`)
+- the agents (`agent/petal-agent.js`, `agent/server.js`, `api/agent.js`, and Petal Lens in `api/lens.js`)
 - the build (`build.js`) and the Vercel config
 
 There is no account system or payment flow yet, so findings about them are design requirements for milestone 1 and milestone 6 (see `docs/ROADMAP.md`).
@@ -18,8 +18,13 @@ person ──> browser tab (Petal) ──> localStorage "petal.state.v1"   (all 
                     └──> /api/agent on the same site (only after the person agrees)
                          gets: cycle data, plus only what Privacy settings allow, and the chat
                          never: name, username, ids (in setup mode, the name only if they type it)
-                         └──> Groq, United States (model picked on the server)
-                              the key stays in the function (Vercel environment variable)
+                    │    └──> Groq, United States (model picked on the server)
+                    │         the key stays in the function (Vercel environment variable)
+                    │
+                    └──> /api/lens on the same site (only after the person agrees)
+                         gets: one photo the person picked, resized on the phone with location
+                               and camera details removed, plus the same consented context
+                         └──> Groq vision model, United States. Never stored or logged by Petal
 ```
 
 Trust boundaries:
@@ -45,7 +50,9 @@ Trust boundaries:
 | 10 | Agent key, consent and abuse. | S, I, D, E. A01, A02, A10, LLM02, LLM06, LLM10 | Key only in a Vercel environment variable. Consent screen names Groq and its country before anything is sent. The endpoint fixes the instructions, model and tools, rebuilds messages from `user` and `assistant` text only, sanitises the snapshot with `migrate()`, checks `Origin`, sizes and the date, rate limits each address, calls one fixed URL and logs nothing. |
 | 11 | The first version of the function cancelled its own model call. It listened for the request's `close` event, which fires once the body is read. | D | Listens on the response instead. Found in end to end testing. |
 
-Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop and endpoint with a scripted model). 42 passing.
+| 12 | Petal Lens (new): photos are personal and can carry location, faces or bodies. | I, T, D, E. A03, A10, LLM01, LLM02, LLM05 | Photos are resized on the phone and re-encoded, which drops EXIF location. The endpoint accepts only image data (never a URL, so no server side fetch), checks the declared type against the file's signature bytes, caps size and rate, and logs nothing. Lens instructions forbid body, weight and looks comments and identifying people, and treat text inside a photo as data. Lens can only propose meal and workout logs. The consent notice has its own Photos section. |
+
+Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/agent.test.js` (agent loop, both endpoints and Lens, with a scripted model). 46 passing.
 
 ## STRIDE
 
@@ -85,7 +92,7 @@ Tests: `test/petal-engine.test.js` (engine, validation, setup guard) and `test/a
 
 | Item | Result |
 |------|--------|
-| LLM01 Prompt injection | Logged text sits inside a `<user_data>` fence it cannot close. The real controls: narrow tools, validation on both sides, and a tap on Save for every change. **Residual:** injected text can still change the wording of advice or the values in a proposed change, which the person sees before saving. |
+| LLM01 Prompt injection | Logged text sits inside a `<user_data>` fence it cannot close. Text written inside a photo (a menu, a label, a screenshot) is declared data in Lens's instructions, and Lens can only propose two kinds of logs. The real controls: narrow tools, validation on both sides, and a tap on Save for every change. **Residual:** injected text can still change the wording of advice or the values in a proposed change, which the person sees before saving. |
 | LLM02 Sensitive information disclosure | Consent screen, category toggles, no names or ids, nothing stored. |
 | LLM03 Supply chain | The model is chosen on the server, never by the client: `GROQ_MODEL` if set, otherwise the first model in `MODEL_PREFERENCE` (`api/agent.js`) that the key can use. Groq retires models, so the list is checked hourly and again after a `model_not_found` error. |
 | LLM04 Data and model poisoning | No training or fine tuning. Not applicable. |
