@@ -9,7 +9,9 @@ The code refers to screens by short codes from the design mockups. Routes are ha
 | F10 | Meal menu | overlay on the dashboard |
 | F11 | Day detail | overlay on the dashboard |
 | F12 | Mood log | `#/mood`, `#/mood/new` |
-| F13 | Assistant chat | `#/assistant` |
+| F13 | Assistant chat with the Petal agent | `#/assistant` |
+| | Setup by chat with the Petal agent | `#/setup/chat` |
+| | Logo screen for 1 second on every open | before any route |
 | P1 | New task | from the planner |
 | P2 | Task check: caution, with a suggested date | after saving a task |
 | P3 | Task check: peak or fine | after saving a task |

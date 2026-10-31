@@ -6,7 +6,7 @@
   "installCommand": "",
   "cleanUrls": true,
   "functions": {
-    "api/chat.js": {
+    "api/agent.js": {
       "maxDuration": 60
     }
   },

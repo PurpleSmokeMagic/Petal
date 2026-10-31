@@ -1,6 +1,6 @@
 # Petal 🌸
 
-**A cycle-syncing planner for working women and students.** Petal plans tasks, workouts, meals and moods around the menstrual cycle, with an AI assistant that runs on your own computer, or online once you agree.
+**A cycle-syncing planner for working women and students.** Petal plans tasks, workouts, meals and moods around the menstrual cycle, with its own AI agent that plans with you and can fill in your setup and logs, once you agree.
 
 **Live demo:** https://petal-swart-phi.vercel.app
 No install and no account. For judges, to see every feature: **Settings → Subscription → turn on "Preview Pro features"**.
@@ -19,34 +19,29 @@ Period trackers predict *when* a period comes. Nothing helps women plan their wo
 
 | Screen | What it does |
 |---|---|
-| **Onboarding (7 steps)** | Name, cycle data, occupation, body data and food allergies, used to personalise everything below. |
+| **Onboarding (7 steps, or by chat)** | Name, cycle data, occupation, body data and food allergies, used to personalise everything below. Answer the forms, or chat with the agent and save its suggestions. Steps cannot be skipped. |
 | **Dashboard** | Today's cycle day and phase, the week ahead, and the day's plan. |
 | **Planner with task check** | Add a task and Petal checks it against your phase. It flags cautions (for example deep work in the late luteal phase) and proposes a better date. |
 | **Meals** | A phase-aware menu with calorie and macro targets (Mifflin St Jeor equation, adjusted by activity and goal, plus 100 kcal in the late luteal phase). |
 | **Workouts** | Weights, pilates and yoga, and running, with phase-matched picks and safety notes. For example, the run pace is eased when you log fatigue or are in the luteal phase. |
 | **Mood log** | Log moods and see patterns by day, month and cycle phase. |
 | **Goals and productivity trends** | Productivity by day of the week and by phase, so you can see your own pattern. |
-| **AI assistant** | A chat that knows your phase and plans with you. It can propose tasks and mood logs, which you confirm before anything is saved. Runs online (Groq) after a consent screen, or fully on your computer (Ollama). |
+| **Petal agent** | Petal's own agent: its instructions, tools and reasoning loop run on Petal's server, with Groq's Llama 3.3 70B as the language model. It looks up your phase, next period, training plan and calorie target, and proposes changes to your profile, cycle, diet, tasks, moods, meals, workouts and periods. Each change shows a Save button. |
 | **Export** | CSV and JSON export of your data. |
 
 ## Privacy by design
 
 - All data stays in your browser (`localStorage`). There is no account and no database.
-- **The assistant asks before anything leaves the device.** Online mode sends your message and consented context to Groq (United States) through Petal's own server function, which holds the API key and stores nothing. Local mode runs on your computer through Ollama or LM Studio, and the app refuses any non-local model address.
-- The model only receives your cycle phase plus the categories you allow in Privacy settings. It never receives your name or ids.
+- **The agent asks before anything leaves the device.** After you agree, your message and consented data go to Petal's server function, which holds the API key, runs the agent and stores nothing, and from there to Groq (United States).
+- The agent only receives your cycle data plus the categories you allow in Privacy settings. It never receives your name or ids (in setup by chat, only what you type).
+- Nothing is saved until you tap Save, and every change is validated on the server and again in the browser.
 - A full security review (STRIDE, OWASP Top 10, OWASP Top 10 for LLM apps) is in [`SECURITY.md`](SECURITY.md).
 
-### Running the assistant
+### Using the agent
 
-**Online (no install).** Open **Assistant** on the live link and tap **Agree and continue**. You can switch back to local in chat options, which withdraws consent.
+Nothing to install. Open **Assistant** (or **Set up by chatting instead** on the first setup screen) and tap **Agree and continue**. Withdraw any time in chat options or Privacy settings.
 
-**On your computer (nothing leaves the device):**
-
-1. Install [Ollama](https://ollama.com) and run `ollama pull llama3.2`.
-2. On the live link, allow the site: set `OLLAMA_ORIGINS` to the live link's address, then restart Ollama. Not needed when you run Petal locally.
-3. Open **Assistant**, then **Use a model on this computer**.
-
-**Deploying your own copy:** add a free Groq key as the `GROQ_API_KEY` environment variable in Vercel (see `SECURITY.md`). Without it, only local mode is offered.
+**Deploying your own copy:** add a free Groq key as the `GROQ_API_KEY` environment variable in Vercel (see `SECURITY.md`). Without it, the app works and the agent shows as unavailable. How the agent works: [`docs/AI_RULES.md`](docs/AI_RULES.md).
 
 ## Run locally
 
@@ -56,7 +51,7 @@ Requirements: Node 18+ (for tests and build) and Python 3 (or any static server)
 git clone https://github.com/PurpleSmokeMagic/Petal.git
 cd Petal
 python -m http.server 5173 --bind 127.0.0.1    # open http://127.0.0.1:5173
-node --test test/*.test.js                       # 32 tests
+node --test test/*.test.js                       # 41 tests
 node build.js                                    # writes dist/index.html, one self-contained file
 ```
 
@@ -69,10 +64,11 @@ index.html               app shell and Content Security Policy
 design/petal.css         design system (phase colours, components)
 src/petal-engine.js      data model, cycle engine, nutrition, workouts, task check, store, validation
 src/exercise-catalog.js  exercises with phase guidance
-src/assistant.js         assistant client: local model or /api/chat, streaming, tool calls
+src/assistant.js         agent client: talks to /api/agent, streams text and proposed changes
 src/app.js               UI: screens and hash routes
-api/chat.js              Vercel server function for the online assistant (holds the Groq key, builds the prompt)
-test/                    32 unit tests (node:test), engine and server function
+agent/petal-agent.js     the Petal agent: instructions, setup and chat modes, tool loop, Groq connector
+api/agent.js             Vercel server function: checks requests, holds the key, runs the agent, streams events
+test/                    41 unit tests (node:test): engine, agent loop and endpoint
 build.js                 inlines everything into one file and hashes scripts for the CSP
 vercel.json              Vercel build and security headers
 docs/                    engine, data model, assistant rules, entitlements, screens, roadmap
@@ -88,7 +84,7 @@ docs/                    engine, data model, assistant rules, entitlements, scre
 |---|---|
 | [`docs/CYCLE_ENGINE.md`](docs/CYCLE_ENGINE.md) | Phase maths, predictions, task check, workout and nutrition rules |
 | [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Stored state, logs, exercise catalog, validation |
-| [`docs/AI_RULES.md`](docs/AI_RULES.md) | What the assistant may see, answer rules, tools and limits |
+| [`docs/AI_RULES.md`](docs/AI_RULES.md) | The Petal agent: how it runs, what it may see, tools, answer rules and limits |
 | [`docs/ENTITLEMENTS.md`](docs/ENTITLEMENTS.md) | Free and Pro features |
 | [`docs/SCREENS.md`](docs/SCREENS.md) | Screen codes used in the code, and their routes |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Done and planned milestones |
@@ -96,13 +92,13 @@ docs/                    engine, data model, assistant rules, entitlements, scre
 
 ## Tech stack
 
-Vanilla JavaScript (no framework, no runtime dependencies), HTML, CSS · Node.js (build and `node:test`) · Vercel (static hosting, one server function, security headers) · Groq (hosted Llama 3.3 70B) · Ollama / LM Studio (local LLM, for example Llama 3.2) · AI tools used to build it: Claude (Anthropic) and Gemini (Google) for design, code, tests and the security review.
+Vanilla JavaScript (no framework, no runtime dependencies), HTML, CSS · Node.js (build and `node:test`) · Vercel (static hosting, one server function, security headers) · Groq (Llama 3.3 70B, the language model behind the Petal agent) · AI tools used to build it: Claude (Anthropic) and Gemini (Google) for design, code, tests and the security review.
 
 ## Honest status
 
 - **Pro** is a preview switch on the device. Billing and server-side checks are not built.
 - **No accounts or sync yet.** Data lives in one browser. Log out only hides screens.
-- **The online assistant is not checked for Pro on the server**, because there are no accounts yet. It is limited by origin, size and rate instead (see `SECURITY.md`).
+- **The agent is free for everyone while testing**, and the server cannot tell people apart without accounts. It is limited by origin, size and rate instead (see `SECURITY.md`).
 - Fonts load from Google Fonts. Self-hosting is planned.
 - Cycle prediction is an estimate. **Petal is not medical advice and not contraception.**
 

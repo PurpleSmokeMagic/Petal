@@ -10,7 +10,7 @@ Everything lives in one JSON object in the browser's `localStorage` under the ke
 | `cycle` | `lastPeriodStart`, `cycleLength`, `periodLength`, `typicalPain` (1 to 10), `typicalFlow` (`light`, `medium`, `heavy`) |
 | `health` | `goal` (`loss`, `gain`, `maintain`), `conditions`, `dietStyles`, `allergies` |
 | `logs` | Flat arrays, see below |
-| `settings` | `theme`, `locale`, `plan` (`free` or `pro`, a UI mirror only), `onboardingStep`, `assistantCanUse` (consent per category), `assistant` (local model address and name), `notifications`, `signedOut` |
+| `settings` | `theme`, `locale`, `plan` (`free` or `pro`, a UI mirror only), `onboardingStep`, `assistantCanUse` (consent per category), `assistant` (`consent`: agreed to send chats to the Petal agent), `notifications`, `signedOut` |
 
 ## Logs
 

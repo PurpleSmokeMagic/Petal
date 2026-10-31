@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#a01878">
-<!-- Content security policy. Scripts only from this site, network only to fonts, this site's /api/chat and a model on this device.
-     build.js swaps the script rule for hashes of the inlined scripts. frame-ancestors needs a real header when hosted. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* https://127.0.0.1:* https://localhost:*; base-uri 'none'; form-action 'none'; object-src 'none'">
+<!-- Content security policy. Scripts only from this site, network only to fonts and this site's /api/agent.
+     build.js swaps the script rule for hashes of the inlined scripts. frame-ancestors is sent as a real header (vercel.json). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Petal</title>
 <link rel="icon" href="public/favicon-32.png">
@@ -59,6 +59,8 @@ button.wtype { color: inherit; font: inherit; }
 .mode-tile { flex: 1; display: flex; flex-direction: column; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
 .chat-page { padding-bottom: calc(240px + env(safe-area-inset-bottom)); }
 .chat-dock { position: fixed; left: 50%; transform: translateX(-50%); width: calc(min(430px, 100vw) - 32px); bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 9; display: flex; flex-direction: column; gap: 8px; }
+.chat-page.no-tabs { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+.chat-dock.no-tabs { bottom: calc(16px + env(safe-area-inset-bottom)); }
 .chat-dock .pt-compose { background: var(--surface-100); box-shadow: var(--shadow-card); }
 .chat-inp { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; padding: 0 12px; font: 400 15px/22px var(--font-sans); color: var(--ink); outline: none; }
 .chat-inp::placeholder { color: var(--ink-muted); }
@@ -66,6 +68,12 @@ button.wtype { color: inherit; font: inherit; }
 .pt-send { cursor: pointer; flex: none; }
 .pt-send rect { fill: currentColor; stroke: none; }
 .pt-msg code, .t-sub code { font: 600 13px/18px ui-monospace, monospace; background: var(--surface-200); padding: 2px 6px; border-radius: 8px; }
+.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: var(--surface-100); transition: opacity 300ms ease-out; }
+.splash b { font: 800 32px/40px var(--font-sans); color: var(--plum); }
+.splash.out { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) { .splash svg { animation: splash-in 600ms ease-out; } }
+@media (prefers-reduced-motion: reduce) { .splash { transition: none; } }
+@keyframes splash-in { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   .sheet { animation: sheet-up 240ms ease-out; }
@@ -79,6 +87,8 @@ button.wtype { color: inherit; font: inherit; }
 </style>
 </head>
 <body>
+<!-- Logo screen on every open. Static so it shows before any script runs; app.js removes it after 1 second. -->
+<div class="splash" id="splash" role="status" aria-label="Opening Petal"><svg viewBox="0 0 100 100" width="96" height="96" aria-hidden="true"><rect width="100" height="100" rx="28" fill="#a01878"/><g transform="translate(50 50)"><path transform="rotate(270) translate(3 3)" d="M0 0A21 21 0 0 1 26 26A21 21 0 0 1 0 0Z" fill="#f26b6b"/><path transform="rotate(0) translate(3 3)" d="M0 0A21 21 0 0 1 26 26A21 21 0 0 1 0 0Z" fill="#8fd694"/><path transform="rotate(90) translate(3 3)" d="M0 0A21 21 0 0 1 26 26A21 21 0 0 1 0 0Z" fill="#ffd24a"/><path transform="rotate(180) translate(3 3)" d="M0 0A21 21 0 0 1 26 26A21 21 0 0 1 0 0Z" fill="#8ec5f0"/><circle r="4" fill="#ffffff"/></g></svg><b>Petal</b></div>
 <main id="app"></main>
 <noscript><p style="padding: 24px">Petal needs JavaScript to run.</p></noscript>
 <script src="src/petal-engine.js"></script>

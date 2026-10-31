@@ -7,10 +7,9 @@ Source: `PRO_FEATURES` and `can()` in `src/petal-engine.js`.
 | `taskCheck` | Task check against the phase, with a suggested date | | ✓ |
 | `productivityTrends` | Productivity charts by day and month | | ✓ |
 | `phaseScaling` | +100 kcal and adjusted macros in the late luteal phase | | ✓ |
-| `assistant` | The AI assistant | | ✓ |
 | `phaseWorkouts` | Phase-matched exercise picks and the intensity cap | | ✓ |
 | `moodPatterns` | Mood patterns by phase | | ✓ |
-| Everything else | Onboarding, dashboard, phases, predictions, planner, meals, all exercises, mood log, export | ✓ | ✓ |
+| Everything else | Onboarding, dashboard, phases, predictions, planner, meals, all exercises, mood log, export, and the Petal agent (free while testing) | ✓ | ✓ |
 
 ## Current state
 

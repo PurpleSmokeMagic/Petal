@@ -6,9 +6,10 @@ Petal today is a single-page app with no server. These are the milestones refere
 
 - Cycle engine, predictions and learning from logged periods
 - Dashboard, planner and task check, meals and calorie targets, workouts, mood log and patterns
-- AI assistant with consent per category and confirmed tool calls: local (Ollama) or online (Groq through a Vercel function, after a consent screen)
+- The Petal agent (server side, Groq as the model): consent screen, sharing per category, read tools on the server, every change confirmed with Save, setup by chat
+- Setup steps that cannot be skipped, and a logo screen on open
 - Security pass: CSP with hashed scripts, input and import validation, CSV formula protection
-- 32 unit tests, Vercel deployment with security headers
+- 41 unit tests, Vercel deployment with security headers
 
 ## Milestone 1: accounts and storage
 
@@ -16,10 +17,10 @@ Petal today is a single-page app with no server. These are the milestones refere
 - Server-side storage with row level security. Only a local cache, cleared on log out
 - Append-only log of plan changes
 
-## Milestone 6: Pro and hosted assistant
+## Milestone 6: Pro and the agent
 
 - Billing, with Pro checked on the server
-- Check Pro and the session in `/api/chat`, add a shared rate limit and a cost cap, then consider Claude as the hosted model
+- Check the session (and Pro, if the agent becomes a Pro feature) in `/api/agent`, add a shared rate limit and a cost cap, then consider Claude as the model behind the agent
 - Remove the "Preview Pro features" switch
 
 ## Also planned

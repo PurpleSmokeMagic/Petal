@@ -246,7 +246,8 @@
       (backTo ? '<button class="back" data-act="go" data-to="' + backTo + '" aria-label="Back">' + svg('back') + '</button>' : '<span style="width:44px"></span>') +
       '<div class="prog" style="grid-template-columns: repeat(7, 1fr)">' + bars + '</div><span class="steplab">Step ' + step + ' of 7</span></div>' +
       inner +
-      '<div class="foot" style="padding-top: 16px"><button class="pt-btn pt-btn-primary block" data-act="continue" data-step="' + step + '">' + (cta || 'Continue') + '</button></div></div>';
+      '<div class="foot" style="padding-top: 16px"><button class="pt-btn pt-btn-primary block" data-act="continue" data-step="' + step + '">' + (cta || 'Continue') + '</button>' +
+      (step === 1 && !ui.editReturn ? '<button class="pt-btn pt-btn-text block" data-act="go" data-to="#/setup/chat">Set up by chatting instead</button>' : '') + '</div></div>';
   }
 
   function chipGroup(section, field, values, labels) {
@@ -1264,7 +1265,8 @@
     return '<div class="ph">' + subPage('Privacy settings', '#/settings', 'Choose what your assistant can use. You can change this any time.') +
       '<div class="sec" style="gap: 12px; margin-top: 24px">' + rows.map(([k, icon, title, sub]) => switchCard('c-' + k, icon, title, sub, a[k], 'data-act="consent" data-field="' + k + '"')).join('') +
       '<p class="t-cap">Every assistant answer shows which of these it used. Cycle day and phase are always shared, because the assistant cannot plan without them. Your name is never shared.</p>' +
-      '<p class="t-cap">The assistant runs on a model on this device, so none of this leaves your computer.</p>' +
+      '<p class="t-cap">The assistant runs online. After you agree, Petal sends these to Groq, an AI service in the United States, only to answer you. Petal does not store your chats.</p>' +
+      (store.getState().settings.assistant.consent ? '<button class="linkbtn" data-act="agent-withdraw" style="align-self: flex-start; padding: 0">Stop using the assistant</button>' : '') +
       '<p class="t-cap">Your cycle data is never used to show ads. Export or delete everything from Settings, one tap each.</p></div></div>';
   }
 
@@ -1299,43 +1301,27 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Assistant (F13): a local model, or Petal's hosted one (Groq)        */
+  /* Assistant (F13) and setup by chat: the Petal agent on the server    */
   /* ------------------------------------------------------------------ */
 
   const A = window.PetalAssistant;
+  const SETUP_HELLO = 'Hi, I am Petal. I will ask a few short questions to set things up, and you can save each answer as we go. First, what should I call you?';
   const chat = {
-    conn: 'unknown',  // 'unknown' | 'checking' | 'offline' | 'ready'
-    models: [],
-    hosted: { available: false, provider: '', model: '' }, // what /api/chat on this site reports
-    askConsent: false, // the person picked the online assistant and has not agreed yet
-    showLocal: false,  // show the local setup steps under the online offer
-    thread: [],       // what the screen shows: { role: 'user' | 'ai', text, basis, tools, error }
-    api: [],          // what the model sees (without the system prompt), memory only
-    notes: [],        // confirmations to tell the model with the next message
+    status: 'unknown', // 'unknown' | 'checking' | 'ready' | 'unavailable' (is /api/agent set up here)
+    mode: 'chat',      // which conversation is on screen: 'chat' (Assistant tab) or 'setup'
+    threads: { chat: [], setup: [{ role: 'ai', text: SETUP_HELLO, basis: [], actions: [] }] }, // what the screen shows
+    history: { chat: [], setup: [{ role: 'assistant', content: SETUP_HELLO }] },               // what the agent sees, memory only
+    notes: [],         // saves and skips to tell the agent with the next message
     busy: false,
     abort: null,
   };
   const SUGGESTIONS = ['Plan my week', 'Dinner ideas', 'Why am I tired?'];
-  const PREFERRED_MODELS = /llama3\.[12]|qwen(2\.5|3)|mistral|gemma3/;
 
-  async function checkConnection() {
-    chat.conn = 'checking';
+  async function checkAgent() {
+    chat.status = 'checking';
     render();
-    const cfg = store.getState().settings.assistant;
-    const [res, hosted] = await Promise.all([A.status(cfg.baseUrl), A.hostedStatus()]);
-    chat.models = res.models;
-    chat.hosted = hosted;
-    chat.conn = res.ok || (cfg.provider === 'hosted' && hosted.available) ? 'ready' : 'offline';
-    if (res.ok && cfg.provider === 'local' && !res.models.includes(cfg.model)) {
-      const pick = res.models.find((m) => PREFERRED_MODELS.test(m)) || res.models[0] || '';
-      if (pick) { store.actions.updateAssistant({ model: pick }); return; }
-    }
+    chat.status = (await A.available()) ? 'ready' : 'unavailable';
     render();
-  }
-
-  // Ollama accepts pages served from this computer by default. A hosted copy (such as a test link) must be allowed by name.
-  function hostedOrigin() {
-    return location.protocol === 'https:' && !['127.0.0.1', 'localhost'].includes(location.hostname) ? location.origin : '';
   }
 
   function contextChips(state, ctx) {
@@ -1365,164 +1351,196 @@
     return out.join('') + (alts.length ? '<div class="pt-alt">' + alts.join('') + '</div>' : '');
   }
 
-  function toolCard(call, mi, ci) {
-    const a = call.args;
-    let title, detail;
-    if (call.name === 'add_task') {
-      title = 'Add task: ' + a.title;
-      detail = fmtLong(a.date) + ' at ' + a.time + ', ' + LABELS.taskType[a.type].toLowerCase() + ', ' + LABELS.effort[a.effort].toLowerCase() + ' effort';
-    } else {
-      title = 'Log mood: ' + a.moods.map((m) => P.MOODS[m].label.toLowerCase()).join(', ');
-      detail = a.note ? 'Note: ' + a.note : 'For today';
+  // Plain words for a proposed change: { title, lines }. Values come from validateToolCall, so they are known good.
+  function describeAction(name, a) {
+    const lines = [];
+    const add = (label, v) => { if (v !== undefined) lines.push(label + ': ' + v); };
+    const listOf = (values, labels) => values.map((v) => labels[v] || v).join(', ') || 'none';
+    switch (name) {
+      case 'update_profile':
+        add('Name', a.displayName); add('Age', a.age); add('Height', a.heightCm != null ? Math.round(a.heightCm) + ' cm' : undefined);
+        add('Weight', a.weightKg != null ? Math.round(a.weightKg * 10) / 10 + ' kg' : undefined);
+        add('Daily activity', a.activityTier ? P.ACTIVITY_TIERS[a.activityTier].label : undefined);
+        add('Occupation', a.occupation ? LABELS.occupation[a.occupation] : undefined); add('Mom', a.isMom === undefined ? undefined : a.isMom ? 'yes' : 'no');
+        add('Workouts you like', a.workoutsLiked ? listOf(a.workoutsLiked, LABELS.workoutsLiked) : undefined);
+        return { title: 'Update your profile', lines };
+      case 'update_cycle':
+        add('Last period started', a.lastPeriodStart ? fmtLong(a.lastPeriodStart) : undefined); add('Cycle length', a.cycleLength ? a.cycleLength + ' days' : undefined);
+        add('Period length', a.periodLength ? a.periodLength + ' days' : undefined); add('Usual pain', a.typicalPain ? a.typicalPain + ' of 10' : undefined); add('Usual flow', a.typicalFlow);
+        return { title: 'Update your cycle', lines };
+      case 'update_health':
+        add('Goal', a.goal ? LABELS.goal[a.goal] : undefined); add('Conditions', a.conditions ? listOf(a.conditions, LABELS.conditions) : undefined);
+        add('Diet', a.dietStyles ? listOf(a.dietStyles, LABELS.dietStyles) : undefined); add('Allergies and avoids', a.allergies ? listOf(a.allergies, LABELS.allergies) : undefined);
+        return { title: 'Update diet and health', lines };
+      case 'add_task':
+        return { title: 'Add task: ' + a.title, lines: [fmtLong(a.date) + ' at ' + a.time + ', ' + LABELS.taskType[a.type].toLowerCase() + ', ' + LABELS.effort[a.effort].toLowerCase() + ' effort'] };
+      case 'log_mood':
+        return { title: 'Log mood: ' + a.moods.map((m) => P.MOODS[m].label.toLowerCase()).join(', '), lines: [a.note ? 'Note: ' + a.note : 'For today'] };
+      case 'log_meal':
+        return { title: 'Log ' + LABELS.meal[a.meal].toLowerCase() + ': ' + a.name, lines: [fmtLong(a.date) + (a.kcal != null ? ', ' + num(a.kcal) + ' kcal' : '')] };
+      case 'log_workout':
+        return { title: 'Log workout: ' + LABELS.workoutType[a.type].toLowerCase(), lines: [a.durationMin + ' minutes, effort ' + a.effort + ' of 10, ' + fmtLong(a.date)] };
+      case 'log_period':
+        add('Started', fmtLong(a.startDate)); add('Ended', a.endDate ? fmtLong(a.endDate) : undefined); add('Flow', a.flow); add('Pain', a.pain ? a.pain + ' of 10' : undefined);
+        return { title: 'Log a period', lines };
+      case 'finish_setup':
+        return { title: 'Finish setup', lines: ['Go to your dashboard. You can change any answer later in Settings.'] };
     }
-    const foot = call.state === 'pending'
-      ? '<div style="display: flex; gap: 8px; margin-top: 8px"><button class="pt-btn pt-btn-secondary" data-act="tool-accept" data-m="' + mi + '" data-c="' + ci + '">' + (call.name === 'add_task' ? 'Add it' : 'Log it') + '</button><button class="pt-btn pt-btn-text" data-act="tool-decline" data-m="' + mi + '" data-c="' + ci + '">Not now</button></div>'
-      : '<span class="t-cap" style="margin-top: 4px">' + (call.state === 'done' ? 'Saved.' : 'Not saved.') + '</span>';
-    return '<div class="pt-card" style="padding: 12px 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 2px"><b style="font: 700 15px/20px var(--font-sans); color: var(--ink); overflow-wrap: anywhere">' + esc(title) + '</b><span class="t-cap" style="overflow-wrap: anywhere">' + esc(detail) + '</span>' + foot + '</div>';
+    return { title: name, lines: [] };
+  }
+
+  // Saves one proposed change after the person tapped Save. Validated again here: model output is untrusted.
+  function applyAction(name, args) {
+    const v = P.validateToolCall(name, args, P.today(now()));
+    if (!v.ok || !v.write) return { ok: false, message: 'That could not be saved' };
+    const a = v.args;
+    switch (v.name) {
+      case 'update_profile': store.actions.updateProfile(a); break;
+      case 'update_cycle': store.actions.updateCycle(a); break;
+      case 'update_health': store.actions.updateHealth(a); break;
+      case 'add_task': {
+        const [y, m, dd] = a.date.split('-').map(Number);
+        const [hh, mm] = a.time.split(':').map(Number);
+        store.actions.addTask({ title: a.title, dueAt: new Date(y, m - 1, dd, hh, mm), type: a.type, effort: a.effort, source: 'assistant' });
+        break;
+      }
+      case 'log_mood': store.actions.logMood({ moods: a.moods, note: a.note, source: 'assistant' }); break;
+      case 'log_meal': store.actions.logMeal(a); break;
+      case 'log_workout': store.actions.logWorkout({ date: a.date, type: a.type, durationMin: a.durationMin, effort: a.effort }); break;
+      case 'log_period': store.actions.logPeriod(a); break;
+      case 'finish_setup':
+        if (!store.actions.completeSetup()) return { ok: false, message: 'Add your name and last period first' };
+        return { ok: true, message: 'You are all set', finished: true };
+    }
+    if (chat.mode === 'setup' && store.select.setupComplete()) store.actions.advanceSetup(2);
+    return { ok: true, message: 'Saved' };
+  }
+
+  function actionCard(act, mi, ai) {
+    const d = describeAction(act.name, act.args);
+    const foot = act.state === 'pending'
+      ? '<div style="display: flex; gap: 8px; margin-top: 8px"><button class="pt-btn pt-btn-secondary" data-act="action-save" data-m="' + mi + '" data-c="' + ai + '">Save</button><button class="pt-btn pt-btn-text" data-act="action-skip" data-m="' + mi + '" data-c="' + ai + '">Not now</button></div>'
+      : '<span class="t-cap" style="margin-top: 4px">' + (act.state === 'done' ? 'Saved.' : act.state === 'failed' ? 'Could not be saved.' : 'Not saved.') + '</span>';
+    return '<div class="pt-card" style="padding: 12px 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 2px"><b style="font: 700 15px/20px var(--font-sans); color: var(--ink); overflow-wrap: anywhere">' + esc(d.title) + '</b>' +
+      d.lines.map((l) => '<span class="t-cap" style="overflow-wrap: anywhere">' + esc(l) + '</span>').join('') + foot + '</div>';
   }
 
   function chatBubble(m, mi) {
     if (m.role === 'user') return '<div class="pt-msg pt-msg-user" style="overflow-wrap: anywhere">' + esc(m.text) + '</div>';
     if (m.error) return '<div class="pt-msg pt-msg-ai" role="alert" style="display: flex; flex-direction: column; gap: 8px"><span>' + esc(m.error) + '</span></div>';
-    const streaming = chat.busy && mi === chat.thread.length - 1;
+    const streaming = chat.busy && mi === chat.threads[chat.mode].length - 1;
     const body = streaming ? '<span data-stream style="white-space: pre-wrap">' + esc(m.text || 'Thinking') + '</span>' : renderModelText(m.text);
+    const pending = (m.actions || []).filter((x) => x.state === 'pending').length;
     return '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 10px; max-width: 94%; overflow-wrap: anywhere">' + body +
-      (m.tools || []).map((c, ci) => toolCard(c, mi, ci)).join('') +
-      (streaming ? '' : '<span class="pt-src">Based on: ' + esc(m.basis.join(', ')) + '.</span><span class="t-cap">This is an estimate, not medical advice. Pain that stops daily life is worth raising with a clinician.</span>') + '</div>';
+      (m.actions || []).map((x, ai) => actionCard(x, mi, ai)).join('') +
+      (pending > 1 && !streaming ? '<button class="pt-btn pt-btn-secondary" data-act="action-save-all" data-m="' + mi + '" style="align-self: flex-start">Save all</button>' : '') +
+      (streaming || chat.mode === 'setup' || !m.basis.length ? '' : '<span class="pt-src">Based on: ' + esc(m.basis.join(', ')) + '.</span><span class="t-cap">This is an estimate, not medical advice. Pain that stops daily life is worth raising with a clinician.</span>') + '</div>';
+  }
+
+  // Shared by both modes: availability, consent, then the conversation.
+  function agentGate(mode, top, frame) {
+    if (chat.status === 'unknown') setTimeout(checkAgent, 0);
+    const card = (inner) => frame(top + '<div class="pt-card" style="margin-top: 24px; padding: 20px; border-radius: 24px; display: flex; flex-direction: column; gap: 10px">' + inner + '</div>');
+    if (chat.status === 'checking' || chat.status === 'unknown') return card('<b class="t-head">Connecting to Petal</b>');
+    if (chat.status === 'unavailable') {
+      return card('<b class="t-head">The assistant is not available right now</b><span class="t-sub" style="margin: 0">Please try again in a little while.</span>' +
+        '<button class="pt-btn pt-btn-primary" data-act="agent-retry" style="align-self: flex-start">Try again</button>' +
+        (mode === 'setup' ? '<button class="linkbtn" data-act="go" data-to="#/setup/1" style="align-self: flex-start; padding: 0">Use the forms instead</button>' : ''));
+    }
+    if (!store.getState().settings.assistant.consent) {
+      return card('<b class="t-head">Before we chat</b>' +
+        '<span class="t-sub" style="margin: 0">Petal\'s assistant runs online. To answer you, Petal sends Groq, an AI service in the United States, ' +
+        (mode === 'setup' ? 'what you type here, including your name, and which setup questions are already answered.' : 'your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent.') +
+        ' Petal does not store your chats.</span>' +
+        '<span class="t-cap">' + (mode === 'setup' ? 'You can switch to the forms at any time.' : 'You can stop any time in chat options or Privacy settings.') + '</span>' +
+        '<button class="pt-btn pt-btn-primary" data-act="agent-agree" style="align-self: flex-start">Agree and continue</button>' +
+        (mode === 'setup' ? '<button class="linkbtn" data-act="go" data-to="#/setup/1" style="align-self: flex-start; padding: 0">Use the forms instead</button>' : ''));
+    }
+    return null;
+  }
+
+  function chatDock(placeholder, suggestions) {
+    return '<div class="chat-dock' + (chat.mode === 'setup' ? ' no-tabs' : '') + '">' + (suggestions ? '<div class="chips" style="gap: 6px">' + suggestions.map((s) => '<button class="opt" data-act="chat-suggest" data-value="' + esc(s) + '" style="height: 40px; font-size: 13px">' + esc(s) + '</button>').join('') + '</div>' : '') +
+      '<form class="pt-compose" data-form="chat" style="padding-left: 4px"><label for="chat-q" class="sr-only">Message</label><input id="chat-q" name="q" class="chat-inp" autocomplete="off" maxlength="1000" placeholder="' + placeholder + '"' + (chat.busy ? ' disabled' : '') + '>' +
+      (chat.busy ? '<button type="button" class="pt-send" data-act="chat-stop" aria-label="Stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>'
+        : '<button type="submit" class="pt-send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>') + '</form></div>';
   }
 
   function assistantScreen() {
+    chat.mode = 'chat';
     const state = store.getState();
     const top = '<div class="top" style="justify-content: space-between"><div style="display: flex; align-items: center; gap: 8px">' + LOGO.replace('width="24" height="24"', 'width="32" height="32"') + '<h1 class="t-title" style="margin: 0">Assistant</h1></div>' +
-      (store.select.can('assistant') ? '<button class="ico" data-act="open" data-type="chat-options" aria-label="Chat options" style="width: 44px; height: 44px">' + svg('dots') + '</button>' : '') + '</div>';
-    if (!store.select.can('assistant')) {
-      return '<div class="ph has-tabs">' + top + '<div class="pt-card" style="margin-top: 24px; padding: 20px; border-radius: 24px; display: flex; flex-direction: column; gap: 8px"><b class="t-head">The assistant is part of Pro</b>' +
-        '<span class="t-sub" style="margin: 0">It reads your phase and the logs you allow, then helps you plan food, training and work.</span>' +
-        '<button class="pt-btn pt-btn-primary" data-act="go" data-to="#/settings/subscription" style="margin-top: 8px; align-self: flex-start">Try Pro features</button></div>' + tabs('assistant') + '</div>';
-    }
-    if (chat.conn === 'unknown') setTimeout(checkConnection, 0);
-    const cfg = state.settings.assistant;
-    const hosted = cfg.provider === 'hosted';
-    if (chat.askConsent || chat.conn !== 'ready' || (!hosted && !cfg.model)) {
-      const checking = chat.conn === 'checking' || chat.conn === 'unknown';
-      const card = (inner) => '<div class="ph has-tabs">' + top + '<div class="pt-card" style="margin-top: 24px; padding: 20px; border-radius: 24px; display: flex; flex-direction: column; gap: 10px">' + inner + '</div>' + tabs('assistant') + '</div>';
-      if (checking && !chat.askConsent) return card('<b class="t-head">Looking for an assistant</b>');
-      const localSteps = (chat.conn === 'ready' ? '' : '<li>Install Ollama from ollama.com and open it.</li>') +
-        '<li>In a terminal, run <code>ollama pull llama3.2</code>.</li>' +
-        (hostedOrigin() ? '<li>Let Ollama accept this site: set <code>OLLAMA_ORIGINS</code> to <code>' + esc(hostedOrigin()) + '</code>, then quit and reopen Ollama.</li>' : '') +
-        '<li>Come back and tap Try again.</li>';
-      // Online offer, shown when this site has the hosted assistant set up. Nothing leaves the device before Agree.
-      if (chat.hosted.available && (chat.askConsent || chat.conn !== 'ready')) {
-        return card('<b class="t-head">Use the online assistant</b>' +
-          '<span class="t-sub" style="margin: 0">To answer you, Petal sends ' + esc(chat.hosted.provider || 'Groq') + ', an AI service in the United States, your message, your cycle day and phase, and only what you allow in Privacy settings. Your name is never sent, and Petal does not store your chats.</span>' +
-          '<span class="t-cap">You can stop any time in chat options. To keep everything on this computer, use a local model instead.</span>' +
-          '<button class="pt-btn pt-btn-primary" data-act="hosted-agree" style="align-self: flex-start">Agree and continue</button>' +
-          (chat.showLocal
-            ? '<ol class="t-sub" style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">' + localSteps + '</ol><button class="pt-btn pt-btn-secondary" data-act="chat-retry" style="align-self: flex-start">Try again</button>'
-            : '<button class="linkbtn" data-act="show-local" style="align-self: flex-start; padding: 0">Use a model on this computer</button>'));
-      }
-      const noModels = chat.conn === 'ready';
-      return card('<b class="t-head">' + (noModels ? 'No model installed yet' : 'Connect a model on this device') + '</b>' +
-        '<span class="t-sub" style="margin: 0">Petal runs the assistant with a free model on your own computer, so your cycle data never leaves it.</span>' +
-        '<ol class="t-sub" style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">' + localSteps + '</ol>' +
-        '<span class="t-cap">Looking at ' + esc(cfg.baseUrl) + '. You can change this in chat options.</span>' +
-        '<button class="pt-btn pt-btn-primary" data-act="chat-retry" style="align-self: flex-start">Try again</button>');
-    }
+      '<button class="ico" data-act="open" data-type="chat-options" aria-label="Chat options" style="width: 44px; height: 44px">' + svg('dots') + '</button></div>';
+    const gate = agentGate('chat', top, (inner) => '<div class="ph has-tabs">' + inner + tabs('assistant') + '</div>');
+    if (gate) return gate;
+    const thread = chat.threads.chat;
     const ctx = P.buildAssistantContext(state, P.today(now()));
     const chips = contextChips(state, ctx).map((c) => '<span class="chip chip-line">' + esc(c) + '</span>').join('');
-    const intro = chat.thread.length ? '' : '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 8px"><span>Ask me about food, training or planning around your cycle. I can also add tasks or log a mood once you confirm.</span>' +
-      '<span class="pt-src">Sharing' + (hosted ? ' with ' + esc(chat.hosted.provider || 'Groq') : '') + ': cycle day and phase' + (Object.keys(state.settings.assistantCanUse).filter((k) => state.settings.assistantCanUse[k]).map((k) => ', ' + { mood: 'moods', pain: 'pain', diet: 'diet', schedule: 'schedule' }[k]).join('')) + '.</span>' +
+    const intro = thread.length ? '' : '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 8px"><span>Ask me about food, training or planning around your cycle. I can also plan tasks, log things and update your answers. You save each change.</span>' +
+      '<span class="pt-src">Sharing: cycle day and phase' + (Object.keys(state.settings.assistantCanUse).filter((k) => state.settings.assistantCanUse[k]).map((k) => ', ' + { mood: 'moods', pain: 'pain', diet: 'diet', schedule: 'schedule' }[k]).join('')) + '.</span>' +
       '<button class="linkbtn" data-act="go" data-to="#/settings/privacy" style="align-self: flex-start; padding: 0">Choose what I can use</button></div>';
     return '<div class="ph has-tabs chat-page">' + top +
       '<div class="chips" style="margin-top: 16px; gap: 6px">' + chips + '</div>' +
-      '<div class="chat" style="margin-top: 16px" aria-live="polite">' + intro + chat.thread.map(chatBubble).join('') + '</div>' +
-      '<div class="chat-dock">' + (chat.thread.length ? '' : '<div class="chips" style="gap: 6px">' + SUGGESTIONS.map((s) => '<button class="opt" data-act="chat-suggest" data-value="' + esc(s) + '" style="height: 40px; font-size: 13px">' + esc(s) + '</button>').join('') + '</div>') +
-      '<form class="pt-compose" data-form="chat" style="padding-left: 4px"><label for="chat-q" class="sr-only">Message</label><input id="chat-q" name="q" class="chat-inp" autocomplete="off" maxlength="1000" placeholder="Ask about your cycle"' + (chat.busy ? ' disabled' : '') + '>' +
-      (chat.busy ? '<button type="button" class="pt-send" data-act="chat-stop" aria-label="Stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>'
-        : '<button type="submit" class="pt-send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>') + '</form></div>' +
-      tabs('assistant') + '</div>';
-  }
-  function chatOptionsSheet() {
-    const cfg = store.getState().settings.assistant;
-    const models = chat.models.length ? chat.models : cfg.model ? [cfg.model] : [];
-    const hosted = cfg.provider === 'hosted';
-    const name = esc(chat.hosted.provider || 'Groq');
-    const providerField = chat.hosted.available || hosted
-      ? '<div class="field"><label for="co-provider">Assistant runs</label><select id="co-provider" name="provider" class="inp">' +
-        '<option value="local"' + (hosted ? '' : ' selected') + '>On this computer</option><option value="hosted"' + (hosted ? ' selected' : '') + '>Online with ' + name + '</option></select></div>'
-      : '';
-    return '<div class="scrim" data-act="close"></div><section class="sheet" role="dialog" aria-modal="true" aria-label="Chat options"><div class="handle"></div>' + sheetHead('Chat options') +
-      '<form data-form="assistant" style="display: flex; flex-direction: column; gap: 12px">' + providerField +
-      (hosted ? '<p class="t-cap">Messages go to ' + name + ' through Petal\'s server, with only the data you allow in Privacy settings. Choose On this computer to stop.</p>' : '<div class="field"><label for="co-model">Model</label>' + (models.length
-        ? '<select id="co-model" name="model" class="inp">' + models.map((m) => '<option value="' + esc(m) + '"' + (m === cfg.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select>'
-        : '<p class="t-cap">No models found yet.</p>') + '</div>' +
-      '<div class="field"><label for="co-url">Model server on this device</label><input id="co-url" name="baseUrl" class="inp" value="' + esc(cfg.baseUrl) + '" inputmode="url" autocomplete="off" spellcheck="false">' +
-      '<p class="t-cap">Only addresses on this computer work, such as http://127.0.0.1:11434 for Ollama or http://127.0.0.1:1234 for LM Studio.</p></div>') +
-      '<p class="t-cap" id="err" role="alert" style="color: var(--period-ink)"></p>' +
-      '<button type="submit" class="pt-btn pt-btn-primary block">Save</button>' +
-      '<button type="button" class="pt-btn pt-btn-text block" data-act="chat-clear">Clear chat</button>' +
-      '<p class="t-cap">Chats stay in this tab only and clear when you reload. ' + (hosted ? 'Petal does not store them.' : 'Nothing is sent anywhere except the model on this device.') + '</p></form></section>';
+      '<div class="chat" style="margin-top: 16px" aria-live="polite">' + intro + thread.map(chatBubble).join('') + '</div>' +
+      chatDock('Ask about your cycle', thread.length ? null : SUGGESTIONS) + tabs('assistant') + '</div>';
   }
 
-  // One user turn: send, run read only tools, stop at the first proposal that needs a person.
-  async function runAssistant(text) {
+  function setupChatScreen() {
+    chat.mode = 'setup';
+    const top = '<div class="top" style="justify-content: space-between"><button class="back" data-act="go" data-to="#/setup/1" aria-label="Back to the setup forms">' + svg('back') + '</button>' +
+      '<div style="display: flex; align-items: center; gap: 8px">' + LOGO + '<span style="font: 800 20px/24px var(--font-sans); color: var(--plum)">Set up with Petal</span></div><span style="width: 44px"></span></div>';
+    const gate = agentGate('setup', top, (inner) => '<div class="ph">' + inner + '</div>');
+    if (gate) return gate;
+    return '<div class="ph chat-page no-tabs">' + top +
+      '<div class="chat" style="margin-top: 16px" aria-live="polite">' + chat.threads.setup.map(chatBubble).join('') + '</div>' +
+      chatDock('Type your answer', null) + '</div>';
+  }
+
+  function chatOptionsSheet() {
+    return '<div class="scrim" data-act="close"></div><section class="sheet" role="dialog" aria-modal="true" aria-label="Chat options"><div class="handle"></div>' + sheetHead('Chat options') +
+      '<div style="display: flex; flex-direction: column; gap: 12px">' +
+      '<button type="button" class="pt-btn pt-btn-secondary block" data-act="chat-clear">Clear chat</button>' +
+      '<button type="button" class="pt-btn pt-btn-text block" data-act="agent-withdraw">Stop using the assistant</button>' +
+      '<p class="t-cap">Chats stay in this tab only and clear when you reload. Petal does not store them. Stopping withdraws your agreement, and the assistant asks again before the next chat.</p></div></section>';
+  }
+
+  // One turn: send the message, stream the answer, collect proposed changes.
+  async function sendToAgent(text) {
+    const mode = chat.mode;
+    const thread = chat.threads[mode];
+    const history = chat.history[mode];
     const state = store.getState();
-    const cfg = state.settings.assistant;
     const todayIso = P.today(now());
     const note = chat.notes.length ? '\n\n(Petal: ' + chat.notes.join(' ') + ')' : '';
     chat.notes = [];
-    chat.thread.push({ role: 'user', text });
-    chat.api.push({ role: 'user', content: text + note });
-    const ctx = P.buildAssistantContext(state, todayIso);
-    const reply = { role: 'ai', text: '', basis: ctx.basis, tools: [] };
-    chat.thread.push(reply);
+    thread.push({ role: 'user', text });
+    history.push({ role: 'user', content: (text + note).slice(0, 2000) });
+    const reply = { role: 'ai', text: '', basis: P.buildAssistantContext(state, todayIso).basis, actions: [] };
+    thread.push(reply);
     chat.busy = true;
     chat.abort = new AbortController();
     render();
     window.scrollTo(0, document.body.scrollHeight);
     try {
-      for (let round = 0; round < 3; round++) {
-        let history = chat.api.slice(-16);
-        while (history.length && history[0].role !== 'user') history = history.slice(1);
-        const prefix = reply.text ? reply.text + '\n\n' : '';
-        const res = await A.chat({
-          signal: chat.abort.signal,
-          ...(cfg.provider === 'hosted'
-            // The server builds the system prompt and tools itself and caps each message at 2000 characters.
-            ? { hosted: true, context: ctx.text, messages: history.map((m) => Object.assign({}, m, { content: String(m.content || '').slice(0, 2000) })) }
-            : { baseUrl: cfg.baseUrl, model: cfg.model, tools: P.ASSISTANT_TOOLS, messages: [{ role: 'system', content: P.buildSystemPrompt(ctx) }].concat(history) }),
-          onToken: (t) => { reply.text = prefix + t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = reply.text; },
-        });
-        reply.text = prefix + res.content;
-        chat.api.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls.length ? res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })) : undefined });
-        let again = false;
-        res.toolCalls.forEach((c) => {
-          const v = P.validateToolCall(c.name, c.arguments, todayIso);
-          let result;
-          if (!v.ok) result = { error: v.error };
-          else if (!v.write) {
-            const info = store.select.phaseFor(v.args.date);
-            result = info ? { date: v.args.date, phase: info.label, cycleDay: info.cycleDay, estimate: true } : { error: 'No cycle data yet.' };
-            again = true;
-          } else {
-            reply.tools.push({ name: v.name, args: v.args, state: 'pending' });
-            result = { status: 'shown to the person for confirmation, not saved yet' };
-          }
-          chat.api.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(result) });
-        });
-        if (!again) break;
-      }
-      if (!reply.text.trim() && !reply.tools.length) reply.text = 'I could not find an answer to that. Try asking another way.';
+      await A.send({
+        mode, today: todayIso, snapshot: P.assistantSnapshot(state, todayIso, mode), messages: history.slice(-16), signal: chat.abort.signal,
+        onToken: (t) => { reply.text = t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = t; },
+        onAction: (name, args) => {
+          const v = P.validateToolCall(name, args, todayIso);
+          if (v.ok && v.write && P.AGENT_MODES[mode].includes(v.name)) { reply.actions.push({ name: v.name, args: v.args, state: 'pending' }); render(); }
+        },
+      });
+      if (!reply.text.trim() && !reply.actions.length) reply.text = 'I could not find an answer to that. Try asking another way.';
+      const suggested = reply.actions.map((x) => describeAction(x.name, x.args).title);
+      history.push({ role: 'assistant', content: (reply.text + (suggested.length ? '\n(Suggested changes: ' + suggested.join('; ') + ')' : '')).slice(0, 2000) });
     } catch (e) {
+      history.pop(); // the agent never answered this message, so do not resend it as context
       const stopped = e && e.name === 'AbortError';
       if (stopped && reply.text) reply.text += ' …';
-      else reply.error = stopped ? 'Stopped. The model took too long or you stopped it.'
-        : cfg.provider === 'hosted'
-          ? (e && e.status === 429 ? 'The online assistant is busy. Wait a minute, then try again.'
-            : e && e.status === 503 ? 'The online assistant is not set up on this site yet.'
-              : 'I could not reach the online assistant. Check your connection, then try again.')
-          : e && e.status === 404 ? 'The model ' + cfg.model + ' is not installed. Pick another one in chat options.'
-            : 'I could not reach the model on this device. Check that Ollama is open, then try again.';
+      else reply.error = stopped ? 'Stopped. The answer took too long or you stopped it.'
+        : (e && (e.status === 429 || e.code === 'rate_limited')) ? 'The assistant is busy. Wait a minute, then try again.'
+          : e && e.status === 503 ? 'The assistant is not set up on this site yet.'
+            : 'I could not reach the assistant. Check your connection, then try again.';
     } finally {
       chat.busy = false;
       chat.abort = null;
@@ -1531,6 +1549,16 @@
       const q = document.getElementById('chat-q');
       if (q) q.focus({ preventScroll: true });
     }
+  }
+
+  function saveAction(mi, ai) {
+    const msg = chat.threads[chat.mode][mi];
+    const act = msg && msg.actions && msg.actions[ai];
+    if (!act || act.state !== 'pending') return null;
+    const res = applyAction(act.name, act.args);
+    act.state = res.ok ? 'done' : 'failed';
+    chat.notes.push((res.ok ? 'They saved: ' : 'Not saved: ') + describeAction(act.name, act.args).title + '.');
+    return res;
   }
 
   /* ------------------------------------------------------------------ */
@@ -1567,9 +1595,16 @@
   function route() {
     const h = location.hash || '#/';
     const done = store.getState().settings.onboardingStep === 'done';
+    if (h === '#/setup/chat') return done ? { name: 'redirect', to: '#/assistant' } : { name: 'setupChat' };
     const m = h.match(/^#\/setup\/([1-7])$/);
-    if (m) return { name: 'setup', step: Number(m[1]) };
-    if (!done) return { name: 'redirect', to: '#/setup/1' };
+    if (m) {
+      // A step typed into the URL cannot skip earlier steps. After setup, steps open only to edit an answer.
+      if (done && !ui.editReturn) return { name: 'redirect', to: '#/settings' };
+      const allowed = store.select.setupStepAllowed();
+      if (Number(m[1]) > allowed) return { name: 'redirect', to: '#/setup/' + allowed };
+      return { name: 'setup', step: Number(m[1]) };
+    }
+    if (!done) return { name: 'redirect', to: '#/setup/' + store.select.setupStepAllowed() };
     if (store.getState().settings.signedOut) return { name: 'welcome' };
     const settings = { '#/settings': 'settings', '#/settings/mode': 'mode', '#/settings/subscription': 'subscription', '#/settings/notifications': 'notifications', '#/settings/privacy': 'privacy' }[h];
     if (settings) return { name: settings };
@@ -1598,9 +1633,9 @@
 
     const screens = { setup: () => SETUP[r.step](), mood: moodScreen, moodHistory, tab: () => placeholder(r.tab), goals: planner, 'new-task': newTaskScreen, trends: trendsScreen, home: dashboard,
       workout: workoutHome, weights: weightsScreen, gym: () => listScreen('gym'), bodyweight: () => listScreen('bodyweight'), mat: pilatesYogaScreen, run: runScreen,
-      assistant: assistantScreen, settings: settingsScreen, mode: modeScreen, subscription: subscriptionScreen, notifications: notificationsScreen, privacy: privacyScreen, welcome: welcomeBack };
+      assistant: assistantScreen, setupChat: setupChatScreen, settings: settingsScreen, mode: modeScreen, subscription: subscriptionScreen, notifications: notificationsScreen, privacy: privacyScreen, welcome: welcomeBack };
     let html = screens[r.name]();
-    if (r.name !== 'setup' && r.name !== 'welcome') html += overlay();
+    if (r.name !== 'setup' && r.name !== 'setupChat' && r.name !== 'welcome') html += overlay();
     if (ui.toast) html += '<div class="toast app-toast" role="status">' + svg('tick') + esc(ui.toast) + '</div>';
     app.innerHTML = html;
 
@@ -1652,39 +1687,47 @@
     },
 
     // assistant
-    'chat-retry': () => checkConnection(),
-    'show-local': () => { chat.showLocal = true; render(); },
-    'hosted-agree': () => {
-      chat.askConsent = false;
-      store.actions.updateAssistant({ provider: 'hosted', hostedConsent: true });
-      chat.conn = 'ready';
+    'agent-retry': () => checkAgent(),
+    'agent-agree': () => store.actions.updateAssistant({ consent: true }),
+    'agent-withdraw': () => {
+      if (chat.abort) chat.abort.abort();
+      ui.overlay = null;
+      store.actions.updateAssistant({ consent: false });
+      toast('The assistant will ask before the next chat');
+    },
+    'chat-suggest': (d) => { if (!chat.busy) sendToAgent(d.value); },
+    'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
+    'chat-clear': () => {
+      if (chat.abort) chat.abort.abort();
+      chat.threads.chat = []; chat.history.chat = []; chat.notes = [];
+      ui.overlay = null;
       render();
     },
-    'chat-suggest': (d) => { if (!chat.busy) runAssistant(d.value); },
-    'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
-    'chat-clear': () => { if (chat.abort) chat.abort.abort(); chat.thread = []; chat.api = []; chat.notes = []; ui.overlay = null; render(); },
-    'tool-accept': (d) => {
-      const call = chat.thread[Number(d.m)] && chat.thread[Number(d.m)].tools[Number(d.c)];
-      if (!call || call.state !== 'pending') return;
-      const v = P.validateToolCall(call.name, call.args, P.today(now())); // check again at the moment of writing
-      if (!v.ok) { call.state = 'declined'; toast('That could not be saved'); return; }
-      if (v.name === 'add_task') {
-        const [y, m, dd] = v.args.date.split('-').map(Number);
-        const [hh, mm] = v.args.time.split(':').map(Number);
-        store.actions.addTask({ title: v.args.title, dueAt: new Date(y, m - 1, dd, hh, mm), type: v.args.type, effort: v.args.effort, source: 'assistant' });
-        chat.notes.push('They confirmed and saved the task "' + v.args.title + '" on ' + v.args.date + '.');
-      } else {
-        store.actions.logMood({ moods: v.args.moods, note: v.args.note, source: 'assistant' });
-        chat.notes.push('They confirmed and logged moods: ' + v.args.moods.join(', ') + '.');
-      }
-      call.state = 'done';
-      toast(v.name === 'add_task' ? 'Task added for ' + fmtDay(v.args.date) : 'Mood saved for today');
+    'action-save': (d) => {
+      const res = saveAction(Number(d.m), Number(d.c));
+      if (!res) return;
+      if (res.finished) { go('#/'); toast(res.message); } else toast(res.message);
     },
-    'tool-decline': (d) => {
-      const call = chat.thread[Number(d.m)] && chat.thread[Number(d.m)].tools[Number(d.c)];
-      if (!call || call.state !== 'pending') return;
-      call.state = 'declined';
-      chat.notes.push('They chose not to save the ' + (call.name === 'add_task' ? 'task "' + call.args.title + '"' : 'mood log') + '.');
+    'action-save-all': (d) => {
+      const msg = chat.threads[chat.mode][Number(d.m)];
+      if (!msg) return;
+      let saved = 0;
+      let finished = false;
+      msg.actions.forEach((x, i) => {
+        if (x.state !== 'pending' || x.name === 'finish_setup') return;
+        const res = saveAction(Number(d.m), i);
+        if (res && res.ok) saved++;
+      });
+      const fin = msg.actions.findIndex((x) => x.state === 'pending' && x.name === 'finish_setup');
+      if (fin >= 0) { const res = saveAction(Number(d.m), fin); finished = Boolean(res && res.finished); }
+      if (finished) { go('#/'); toast('You are all set'); } else toast(saved === 1 ? 'Saved 1 change' : 'Saved ' + saved + ' changes');
+    },
+    'action-skip': (d) => {
+      const msg = chat.threads[chat.mode][Number(d.m)];
+      const act = msg && msg.actions && msg.actions[Number(d.c)];
+      if (!act || act.state !== 'pending') return;
+      act.state = 'declined';
+      chat.notes.push('They chose not to save: ' + describeAction(act.name, act.args).title + '.');
       render();
     },
 
@@ -1764,11 +1807,12 @@
         return;
       }
       if (step < 7) {
-        if (s.settings.onboardingStep !== 'done') store.actions.updateSettings({ onboardingStep: 'step' + (step + 1) });
+        store.actions.advanceSetup(step);
         go('#/setup/' + (step + 1));
-      } else {
-        store.actions.updateSettings({ onboardingStep: 'done' });
+      } else if (store.actions.completeSetup()) {
         go('#/');
+      } else {
+        go('#/setup/' + store.select.setupStepAllowed());
       }
     },
 
@@ -1977,31 +2021,7 @@
     const kind = e.target.dataset.form;
     if (kind === 'chat') {
       const q = String(f.q || '').trim().slice(0, 1000);
-      if (q && !chat.busy) runAssistant(q);
-      return;
-    }
-    if (kind === 'assistant') {
-      const cur = store.getState().settings.assistant;
-      if (f.provider === 'hosted' || (f.provider == null && cur.provider === 'hosted')) {
-        ui.overlay = null;
-        if (cur.hostedConsent) { store.actions.updateAssistant({ provider: 'hosted' }); toast('Saved'); } else { chat.askConsent = true; render(); }
-        return;
-      }
-      if (f.provider === 'local' && cur.provider === 'hosted') {
-        // Leaving online mode withdraws consent, so switching back asks again.
-        store.actions.updateAssistant({ provider: 'local', hostedConsent: false });
-        ui.overlay = null;
-        chat.conn = 'unknown';
-        render();
-        toast('Using a model on this computer');
-        return;
-      }
-      if (!P.isLoopbackUrl(String(f.baseUrl || '').trim())) { showError('Use an address on this computer, such as http://127.0.0.1:11434.'); return; }
-      const before = store.getState().settings.assistant.baseUrl;
-      store.actions.updateAssistant({ baseUrl: String(f.baseUrl).trim(), model: f.model || store.getState().settings.assistant.model });
-      ui.overlay = null;
-      if (store.getState().settings.assistant.baseUrl !== before) { chat.models = []; checkConnection(); } else render();
-      toast('Saved');
+      if (q && !chat.busy) sendToAgent(q);
       return;
     }
     if (kind === 'meal') {
@@ -2042,4 +2062,13 @@
   // Console access only when asked for with ?debug, so other scripts cannot find the store by name.
   if (new URLSearchParams(location.search).has('debug')) window.petalStore = store;
   render();
+
+  // The logo screen stays for 1 second from page start, then fades out and is removed.
+  const splash = document.getElementById('splash');
+  if (splash) {
+    setTimeout(() => {
+      splash.classList.add('out');
+      setTimeout(() => splash.remove(), 350);
+    }, Math.max(0, 1000 - performance.now()));
+  }
 })();
