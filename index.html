@@ -82,7 +82,7 @@ button.wtype { color: inherit; font: inherit; }
 .qcircle:hover .dot, .qcircle:focus-visible .dot { transform: scale(1.05); }
 .qcircle:focus-visible { outline: none; }
 .qcircle:focus-visible .dot { box-shadow: 0 0 0 3px var(--plum); }
-.tip-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: calc(min(430px, 100vw) - 32px); max-width: none; bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 12; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-float); border-radius: 24px; border-bottom-left-radius: 8px; }
+.tip-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: calc(min(430px, 100vw) - 32px); max-width: none; bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 12; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 16px; box-sizing: border-box; box-shadow: var(--shadow-float); border-radius: 24px; border-bottom-left-radius: 8px; }
 @media (prefers-reduced-motion: no-preference) { .tip-bubble { animation: tip-in 240ms ease-out; } }
 @keyframes tip-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 /* The calorie card is last on the dashboard: extra room below it lets the meal menu open fully above the tab bar. */
