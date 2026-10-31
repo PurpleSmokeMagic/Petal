@@ -74,6 +74,17 @@ button.wtype { color: inherit; font: inherit; }
 @media (prefers-reduced-motion: no-preference) { .splash svg { animation: splash-in 600ms ease-out; } }
 @media (prefers-reduced-motion: reduce) { .splash { transition: none; } }
 @keyframes splash-in { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.qcircles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.qcircle { display: flex; flex-direction: column; align-items: center; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; font: 600 13px/18px var(--font-sans); color: var(--plum); }
+.qcircle .dot { width: 64px; height: 64px; border-radius: 9999px; background: var(--surface-300); display: flex; align-items: center; justify-content: center; position: relative; transition: transform 120ms ease-out; }
+.qcircle .dot svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.qcircle .dot::after { content: '+'; position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 9999px; background: var(--action); color: var(--on-action); font: 700 16px/22px var(--font-sans); text-align: center; border: 2px solid var(--surface-100); }
+.qcircle:hover .dot, .qcircle:focus-visible .dot { transform: scale(1.05); }
+.qcircle:focus-visible { outline: none; }
+.qcircle:focus-visible .dot { box-shadow: 0 0 0 3px var(--plum); }
+.tip-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: calc(min(430px, 100vw) - 32px); max-width: none; bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 12; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-float); border-radius: 24px; border-bottom-left-radius: 8px; }
+@media (prefers-reduced-motion: no-preference) { .tip-bubble { animation: tip-in 240ms ease-out; } }
+@keyframes tip-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   .sheet { animation: sheet-up 240ms ease-out; }

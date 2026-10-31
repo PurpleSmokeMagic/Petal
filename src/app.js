@@ -476,10 +476,10 @@
       '<div style="display: flex; align-items: center; gap: 16px; margin-top: 12px">' + ring + '</div>' +
       '<div class="macros" style="margin-top: 16px">' + macro('Carbs', 'var(--luteal)', day.totals.carbsG, tg.carbsG) + macro('Protein', 'var(--action)', day.totals.proteinG, tg.proteinG) + macro('Fats', 'var(--ovulation)', day.totals.fatG, tg.fatG, '; box-shadow: inset 0 0 0 1px var(--ovulation-ink)') + '</div>' +
       '<p class="t-cap" style="margin-top: 12px">' + (day.target ? esc(day.target.basis) + '. Targets adjust to your phase and goal.' : 'Targets adjust to your phase and goal.') + '</p></section>' +
-      '<div class="qrow" style="margin-top: 12px">' +
-      '<button class="pt-btn pt-btn-secondary" data-act="open" data-type="workout">' + svg('plus') + 'Workout</button>' +
-      '<button class="pt-btn pt-btn-secondary" data-act="new-task">' + svg('plus') + 'Event</button>' +
-      '<button class="pt-btn pt-btn-secondary" data-act="go" data-to="#/mood/new">' + svg('plus') + 'Mood</button></div>' +
+      '<div class="qcircles" style="margin-top: 16px">' +
+      '<button class="qcircle" data-act="workout-tip" aria-label="Workouts, with a recommendation for today"><span class="dot">' + svg('dumbbell') + '</span>Workout</button>' +
+      '<button class="qcircle" data-act="new-task" aria-label="Add an event"><span class="dot">' + svg('cal') + '</span>Event</button>' +
+      '<button class="qcircle" data-act="go" data-to="#/mood/new" aria-label="Log your mood"><span class="dot">' + svg('face') + '</span>Mood</button></div>' +
       planner +
       '<button class="fab" data-act="go" data-to="#/assistant" aria-label="Open assistant chat">' + svg('chat') + '</button>' +
       tabs('cycle') + '</div>';
@@ -965,7 +965,7 @@
         : 'Phase matched picks and caution notes are part of Pro. Every exercise is still open to you.') + '</p>' +
       '<section class="pt-card" style="margin-top: 16px"><div style="display: flex; align-items: baseline; justify-content: space-between"><h2 class="t-head">This week</h2><span class="t-cap">' + thisWeek.length + (thisWeek.length === 1 ? ' workout, ' : ' workouts, ') + minutes + ' minutes</span></div>' +
       (recent ? '<div style="margin-top: 4px">' + recent + '</div>' : '<p class="t-cap" style="margin-top: 4px">No workouts logged yet. Finish one here or log it from the dashboard.</p>') + '</section>' +
-      tabs('workout') + '</div>';
+      workoutTipBubble() + tabs('workout') + '</div>';
   }
 
   function weightsScreen() {
@@ -1318,6 +1318,74 @@
     abort: null,
   };
   const SUGGESTIONS = ['Plan my week', 'Dinner ideas', 'Why am I tired?'];
+
+  /*
+   * Workout tip: the dashboard's Workout button opens the workout page with a Petal bubble.
+   * With consent the agent writes it; without, an on-device tip from the phase (nothing is sent).
+   */
+  const TIP_PROMPT = 'What workout do you recommend for me today, and how hard should I go? Answer in at most 3 short sentences. Do not suggest any changes to save.';
+  let tip = null; // { text, busy, error, agent, abort }
+  const PHASE_MOVE_TIP = {
+    menstrual: 'Your menstrual phase suits restorative movement, like walking, gentle yoga and stretching.',
+    follicular: 'Your follicular phase suits rising intensity, so strength work and cardio are a good fit.',
+    ovulation: 'Energy often peaks around ovulation, so heavy lifts or interval training fit well today.',
+    luteal: 'Your luteal phase suits moderate, low impact training, like pilates and steady cardio.',
+  };
+  function localWorkoutTip() {
+    const plan = proPlan();
+    if (plan) {
+      const best = plan.types[0];
+      const name = (WORKOUT_TYPES_UI[best.key] || { name: best.key }).name;
+      return name + ' fits your ' + plan.info.label.toLowerCase() + ' phase best today. ' +
+        (plan.caution ? 'Keep it gentle, about ' + plan.loadPercent + '% of your usual load.' : 'You can go up to about ' + plan.loadPercent + '% of your usual load.') +
+        ' A run would be ' + plan.run.minMinutes + ' to ' + plan.run.targetMinutes + ' minutes at an ' + plan.run.pace + ' pace.';
+    }
+    const info = store.select.currentPhase();
+    if (!info) return 'Pick what you feel like doing today.';
+    return PHASE_MOVE_TIP[info.phase] + (info.isLateLuteal ? ' Near the end of your cycle, keep the effort gentle.' : '');
+  }
+  async function startWorkoutTip() {
+    if (tip && tip.abort) tip.abort.abort();
+    tip = { text: localWorkoutTip(), busy: false, error: null, agent: false, abort: null };
+    if (!store.getState().settings.assistant.consent) return;
+    if (chat.status !== 'ready') { chat.status = (await A.available()) ? 'ready' : 'unavailable'; }
+    if (chat.status !== 'ready' || !tip) return;
+    const mine = tip;
+    Object.assign(mine, { busy: true, agent: true, text: '', abort: new AbortController() });
+    render();
+    const state = store.getState();
+    const todayIso = P.today(now());
+    try {
+      await A.send({
+        mode: 'chat', today: todayIso, snapshot: P.assistantSnapshot(state, todayIso, 'chat'), messages: [{ role: 'user', content: TIP_PROMPT }], signal: mine.abort.signal,
+        onToken: (t) => { mine.text = t; const el = app.querySelector('[data-tip]'); if (el) el.textContent = t; },
+      });
+      if (!mine.text.trim()) { mine.text = localWorkoutTip(); mine.agent = false; }
+    } catch (e) {
+      // Fall back to the on-device tip, so the bubble is always useful.
+      if (!(e && e.name === 'AbortError')) { mine.text = localWorkoutTip(); mine.agent = false; mine.error = true; }
+    } finally {
+      mine.busy = false;
+      mine.abort = null;
+      if (tip === mine) render();
+    }
+  }
+  function closeWorkoutTip() {
+    if (tip && tip.abort) tip.abort.abort();
+    tip = null;
+  }
+  function workoutTipBubble() {
+    if (!tip) return '';
+    const consent = store.getState().settings.assistant.consent;
+    const body = tip.busy && !tip.text ? 'Thinking about today' : tip.text;
+    return '<aside class="tip-bubble pt-msg-ai" role="status" aria-live="polite">' +
+      '<div style="display: flex; align-items: center; gap: 8px">' + LOGO + '<b style="font: 700 15px/20px var(--font-sans); color: var(--ink); flex: 1">Petal</b>' +
+      '<button class="ico" data-act="workout-tip-close" aria-label="Close the recommendation" style="width: 36px; height: 36px">' + svg('close') + '</button></div>' +
+      '<span data-tip style="white-space: pre-wrap">' + (tip.busy ? esc(body) : renderModelText(body)) + '</span>' +
+      (tip.busy ? '' : '<span class="t-cap">' + (tip.agent ? '' : tip.error ? 'The assistant could not answer, so this tip comes from your phase. ' : 'This tip comes from your phase, on this device. ') + 'This is an estimate, not medical advice.</span>' +
+        '<button class="linkbtn" data-act="go" data-to="#/assistant" style="align-self: flex-start; padding: 0">' + (consent ? 'Ask Petal more' : 'Get a personal recommendation from Petal') + '</button>') +
+      '</aside>';
+  }
 
   async function checkAgent() {
     chat.status = 'checking';
@@ -1717,6 +1785,8 @@
       toast('The assistant will ask before the next chat');
     },
     'chat-suggest': (d) => { if (!chat.busy) sendToAgent(d.value); },
+    'workout-tip': () => { go('#/workout'); startWorkoutTip(); render(); },
+    'workout-tip-close': () => { closeWorkoutTip(); render(); },
     'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
     'chat-clear': () => {
       if (chat.abort) chat.abort.abort();
@@ -2069,6 +2139,7 @@
     if (location.hash === '#/mood/new' && from !== '#/mood/new') ui.moodReturn = from === '#/mood' ? '#/mood' : '#/';
     if (location.hash === '#/settings/mode' && from !== '#/settings/mode') ui.settingsBack = from.startsWith('#/setup') ? '#/' : from;
     if (!location.hash.startsWith('#/setup/')) ui.editReturn = null;
+    if (location.hash !== '#/workout') closeWorkoutTip();
     if (!ui.keepOverlay) ui.overlay = null;
     ui.keepOverlay = false;
     render();
