@@ -103,10 +103,10 @@ button.wtype { color: inherit; font: inherit; }
 .mday.fertile { background: var(--ovulation); }
 .mday.luteal { background: var(--luteal); }
 .mday.out { opacity: .38; }
-.mday.today { background: var(--action); color: var(--on-action); font-weight: 800; opacity: 1; }
+/* Today keeps its phase colour; a plum ring, with a thin gap, marks it. */
+.mday.today { font-weight: 800; opacity: 1; box-shadow: 0 0 0 2px var(--surface-200), 0 0 0 4.5px var(--action); }
 .mday:focus-visible { outline: 3px solid var(--plum); outline-offset: 2px; }
 .mday .task-dot { position: absolute; bottom: 3px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 9999px; background: var(--plum); }
-.mday.today .task-dot { background: var(--on-action); }
 /* Day timeline */
 .day-page { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
 .day-head { display: flex; align-items: center; gap: 8px; }

@@ -179,7 +179,7 @@
   }
 
   function tabs(current) {
-    const items = [['cycle', 'Cycle', 'drop'], ['workout', 'Workout', 'dumbbell'], ['assistant', 'Assistant', 'chat'], ['goals', 'Goals', 'target'], ['pro', 'Pro', 'crown']];
+    const items = [['cycle', 'Home', 'home'], ['workout', 'Workout', 'dumbbell'], ['assistant', 'Assistant', 'chat'], ['goals', 'Goals', 'target'], ['pro', 'Pro', 'crown']];
     return '<nav class="tabs" aria-label="Main">' + items.map(([key, label, icon]) =>
       '<button class="tab" data-act="go" data-to="' + (key === 'cycle' ? '#/' : key === 'goals' ? '#/goals' : key === 'workout' ? '#/workout' : '#/' + key) + '"' + (current === key ? ' aria-current="page"' : '') + '>' + svg(icon) + label + '</button>'
     ).join('') + '</nav>';
@@ -470,7 +470,7 @@
         rows.push('<div class="mrow' + (wk[0].date === thisWeek ? ' now' : '') + '">' + wk.map(cell).join('') + '</div>');
       }
       const onToday = y === tp.y && m === tp.m;
-      const legend = [['menstrual', 'var(--period)', 'Period'], ['follicular', 'var(--follicular)', 'Follicular'], ['fertile', 'var(--ovulation)', 'Fertile'], ['luteal', 'var(--luteal)', 'Luteal'], ['today', 'var(--action)', 'Today']]
+      const legend = [['menstrual', 'var(--period)', 'Period'], ['follicular', 'var(--follicular)', 'Follicular'], ['fertile', 'var(--ovulation)', 'Fertile'], ['luteal', 'var(--luteal)', 'Luteal'], ['today', 'transparent; box-shadow: inset 0 0 0 2.5px var(--action)', 'Today']]
         .filter(([k]) => seen.has(k)).map(([, c, l]) => '<span><i style="background: ' + c + '"></i>' + l + '</span>').join('');
       const tok = P.PHASES[info.phase].token;
       planner = '<section class="pt-card" style="margin-top: 16px; border-radius: 24px" aria-label="Cycle planner">' +
@@ -1441,6 +1441,19 @@
   const SUGGESTIONS = ['Plan my week', 'Dinner ideas', 'Why am I tired?'];
 
   /*
+   * Opening briefing: when the Assistant tab opens on an empty chat, Petal speaks first. The model
+   * writes "Hello NAME," and the app puts the real name in on this phone, so the name is never sent.
+   */
+  const BRIEFING_PROMPT = 'Open our chat with a short daily briefing. Start with exactly "Hello NAME," because Petal fills in my name on my phone. ' +
+    'Then, in one or two sentences, say what you notice today from my phase and anything I logged: meals, moods, symptoms, workouts and tasks. ' +
+    'Then give recommendations under two bold headings, **Meals** and **Workouts**, one or two lines each, based on my phase and my logs. Use your tools for facts. ' +
+    'If I share little data, end with one line on what logging or sharing more would add. Under 150 words. Do not suggest changes to save.';
+  function withName(text) {
+    const name = store.getState().profile.displayName;
+    return String(text).replace(/\bNAME\b/g, name || 'there');
+  }
+
+  /*
    * Workout tip: the dashboard's Workout button opens the workout page with a Petal bubble.
    * With consent the agent writes it; without, an on-device tip from the phase (nothing is sent).
    */
@@ -1625,7 +1638,8 @@
     }
     if (m.error) return '<div class="pt-msg pt-msg-ai" role="alert" style="display: flex; flex-direction: column; gap: 8px"><span>' + esc(m.error) + '</span></div>';
     const streaming = chat.busy && mi === chat.threads[chat.mode].length - 1;
-    const body = streaming ? '<span data-stream style="white-space: pre-wrap">' + esc(m.text || 'Thinking') + '</span>' : renderModelText(m.text);
+    const shown = m.briefing ? withName(m.text) : m.text;
+    const body = streaming ? '<span data-stream style="white-space: pre-wrap">' + esc(shown || (m.briefing ? 'Looking at your day' : 'Thinking')) + '</span>' : renderModelText(shown);
     const pending = (m.actions || []).filter((x) => x.state === 'pending').length;
     return '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 10px; max-width: 94%; overflow-wrap: anywhere">' + body +
       (m.actions || []).map((x, ai) => actionCard(x, mi, ai)).join('') +
@@ -1650,7 +1664,11 @@
         ' to an external AI provider that processes it for Petal on servers in the United States, only to answer you. Petal does not store your chats.</span>' +
         '<button class="linkbtn" data-act="open" data-type="ai-notice" style="align-self: flex-start; padding: 0">How your data is used</button>' +
         '<span class="t-cap">' + (mode === 'setup' ? 'You can switch to the forms at any time.' : 'You can stop any time in chat options or Privacy settings.') + '</span>' +
-        '<button class="pt-btn pt-btn-primary" data-act="agent-agree" style="align-self: flex-start">Agree and continue</button>' +
+        (mode === 'setup'
+          ? '<button class="pt-btn pt-btn-primary" data-act="agent-agree" style="align-self: flex-start">Agree and continue</button>'
+          : '<span class="t-sub" style="margin: 0">For advice based on your day, Petal can also use your logs: moods, pain and symptoms, diet and meals, schedule and workouts.</span>' +
+            '<button class="pt-btn pt-btn-primary" data-act="agent-agree-all" style="align-self: flex-start">Agree and use my logs</button>' +
+            '<button class="pt-btn pt-btn-text" data-act="agent-agree" style="align-self: flex-start; padding: 0 4px">Agree, phase only</button>') +
         (mode === 'setup' ? '<button class="linkbtn" data-act="go" data-to="#/setup/1" style="align-self: flex-start; padding: 0">Use the forms instead</button>' : ''));
     }
     return null;
@@ -1673,6 +1691,7 @@
     const gate = agentGate('chat', top, (inner) => '<div class="ph has-tabs">' + inner + tabs('assistant') + '</div>');
     if (gate) return gate;
     const thread = chat.threads.chat;
+    if (!thread.length && !chat.busy && !chat.briefed) { chat.briefed = true; setTimeout(() => sendToAgent(BRIEFING_PROMPT, { briefing: true }), 0); }
     const ctx = P.buildAssistantContext(state, P.today(now()));
     const chips = contextChips(state, ctx).map((c) => '<span class="chip chip-line">' + esc(c) + '</span>').join('');
     const intro = thread.length ? '' : '<div class="pt-msg pt-msg-ai" style="display: flex; flex-direction: column; gap: 8px"><span>Ask me about food, training or planning around your cycle. I can also plan tasks, log things and update your answers. You save each change.</span>' +
@@ -1681,7 +1700,7 @@
     return '<div class="ph has-tabs chat-page">' + top +
       '<div class="chips" style="margin-top: 16px; gap: 6px">' + chips + '</div>' +
       '<div class="chat" style="margin-top: 16px" aria-live="polite">' + intro + thread.map(chatBubble).join('') + '</div>' +
-      chatDock('Ask, or share a photo', thread.length ? null : SUGGESTIONS) + tabs('assistant') + '</div>';
+      chatDock('Ask, or share a photo', thread.some((m) => m.role === 'user') ? null : SUGGESTIONS) + tabs('assistant') + '</div>';
   }
 
   function setupChatScreen() {
@@ -1806,7 +1825,8 @@
   }
 
   // One turn: send the message, stream the answer, collect proposed changes.
-  async function sendToAgent(text) {
+  async function sendToAgent(text, opts) {
+    const briefing = Boolean(opts && opts.briefing);
     const mode = chat.mode;
     const thread = chat.threads[mode];
     const history = chat.history[mode];
@@ -1814,9 +1834,9 @@
     const todayIso = P.today(now());
     const note = chat.notes.length ? '\n\n(Petal: ' + chat.notes.join(' ') + ')' : '';
     chat.notes = [];
-    thread.push({ role: 'user', text });
+    if (!briefing) thread.push({ role: 'user', text }); // the briefing prompt is not shown as a message
     history.push({ role: 'user', content: (text + note).slice(0, 2000) });
-    const reply = { role: 'ai', text: '', basis: P.buildAssistantContext(state, todayIso).basis, actions: [] };
+    const reply = { role: 'ai', text: '', basis: P.buildAssistantContext(state, todayIso).basis, actions: [], briefing };
     thread.push(reply);
     chat.busy = true;
     chat.abort = new AbortController();
@@ -1825,12 +1845,14 @@
     try {
       await A.send({
         mode, today: todayIso, snapshot: P.assistantSnapshot(state, todayIso, mode), messages: history.slice(-16), signal: chat.abort.signal,
-        onToken: (t) => { reply.text = t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = t; },
+        onToken: (t) => { reply.text = t; const el = app.querySelector('[data-stream]'); if (el) el.textContent = briefing ? withName(t) : t; },
         onAction: (name, args) => {
+          if (briefing) return; // the briefing only advises
           const v = P.validateToolCall(name, args, todayIso);
           if (v.ok && v.write && P.AGENT_MODES[mode].includes(v.name)) { reply.actions.push({ name: v.name, args: v.args, state: 'pending' }); render(); }
         },
       });
+      if (briefing && reply.text && !/^\s*hello\b/i.test(reply.text)) reply.text = 'Hello NAME, ' + reply.text;
       if (!reply.text.trim() && !reply.actions.length) reply.text = 'I could not find an answer to that. Try asking another way.';
       const suggested = reply.actions.map((x) => describeAction(x.name, x.args).title);
       history.push({ role: 'assistant', content: (reply.text + (suggested.length ? '\n(Suggested changes: ' + suggested.join('; ') + ')' : '')).slice(0, 2000) });
@@ -1996,6 +2018,10 @@
 
     // assistant
     'agent-retry': () => checkAgent(),
+    'agent-agree-all': () => {
+      store.actions.updateConsent({ mood: true, pain: true, diet: true, schedule: true });
+      ACTIONS['agent-agree']();
+    },
     'agent-agree': () => {
       store.actions.updateAssistant({ consent: true });
       if (pendingPhoto && chat.status === 'ready') { const f = pendingPhoto; pendingPhoto = null; sendPhotoToLens(f); }
@@ -2013,7 +2039,7 @@
     'chat-stop': () => { if (chat.abort) chat.abort.abort(); },
     'chat-clear': () => {
       if (chat.abort) chat.abort.abort();
-      chat.threads.chat = []; chat.history.chat = []; chat.notes = [];
+      chat.threads.chat = []; chat.history.chat = []; chat.notes = []; chat.briefed = false;
       ui.overlay = null;
       render();
     },

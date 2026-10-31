@@ -28,6 +28,12 @@ app (browser) ──POST /api/agent──> Petal agent (Vercel function) ──>
 
 In setup mode the agent asks one topic at a time, in the order of the setup forms, skipping what is answered. It receives only yes or no for each setup topic, never the values. Setup can only finish after the name and last period start are saved, and `completeSetup()` checks this again.
 
+## Daily briefing
+
+When the Assistant tab opens on an empty chat, Petal speaks first: it greets the person, says what it notices today from their phase and logs (meals, moods, symptoms, workouts, tasks), then gives recommendations under **Meals** and **Workouts**. The prompt is not shown as a message, and the briefing cannot propose changes.
+
+The model writes "Hello NAME," and the app puts the real name in on the phone, so the name is still never sent. The consent screen offers **Agree and use my logs** (turns on all four sharing toggles) or **Agree, phase only**. With phase only, the briefing says what sharing more would add.
+
 ## Petal Lens (photos)
 
 Lens is Petal's second agent. It looks at one photo of a meal, a drink, food packaging, or a workout (equipment, an exercise, a workout screen or plan), says what it sees, comments for the person's phase, goal, diet and allergies, gives one recommendation, and can propose a meal or workout log with a Save button.
