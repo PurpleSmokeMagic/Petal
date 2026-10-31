@@ -469,6 +469,12 @@
     }
 
     return '<div class="ph has-tabs">' + header() +
+      // Phase and week first, quick actions, then calories and macros at the bottom.
+      planner +
+      '<div class="qcircles" style="margin-top: 16px">' +
+      '<button class="qcircle" data-act="workout-tip" aria-label="Workouts, with a recommendation for today"><span class="dot">' + svg('dumbbell') + '</span>Workout</button>' +
+      '<button class="qcircle" data-act="new-task" aria-label="Add an event"><span class="dot">' + svg('cal') + '</span>Event</button>' +
+      '<button class="qcircle" data-act="go" data-to="#/mood/new" aria-label="Log your mood"><span class="dot">' + svg('face') + '</span>Mood</button></div>' +
       '<section class="hero" style="margin-top: 16px" aria-label="Calories and macros">' +
       '<div style="display: flex; align-items: center; justify-content: space-between"><div style="display: flex; align-items: center; gap: 8px">' + (info ? phaseChip(info) + '<span class="t-cap">Day ' + info.cycleDay + '</span>' : '<span class="t-cap">' + esc(fmtLong(t)) + '</span>') + '</div>' +
       (radial ? '<span style="width:44px;height:44px"></span>' : '<button class="addbtn" data-act="open" data-type="radial" aria-label="Add meal">' + svg('plus') + '</button>') + '</div>' +
@@ -476,11 +482,6 @@
       '<div style="display: flex; align-items: center; gap: 16px; margin-top: 12px">' + ring + '</div>' +
       '<div class="macros" style="margin-top: 16px">' + macro('Carbs', 'var(--luteal)', day.totals.carbsG, tg.carbsG) + macro('Protein', 'var(--action)', day.totals.proteinG, tg.proteinG) + macro('Fats', 'var(--ovulation)', day.totals.fatG, tg.fatG, '; box-shadow: inset 0 0 0 1px var(--ovulation-ink)') + '</div>' +
       '<p class="t-cap" style="margin-top: 12px">' + (day.target ? esc(day.target.basis) + '. Targets adjust to your phase and goal.' : 'Targets adjust to your phase and goal.') + '</p></section>' +
-      '<div class="qcircles" style="margin-top: 16px">' +
-      '<button class="qcircle" data-act="workout-tip" aria-label="Workouts, with a recommendation for today"><span class="dot">' + svg('dumbbell') + '</span>Workout</button>' +
-      '<button class="qcircle" data-act="new-task" aria-label="Add an event"><span class="dot">' + svg('cal') + '</span>Event</button>' +
-      '<button class="qcircle" data-act="go" data-to="#/mood/new" aria-label="Log your mood"><span class="dot">' + svg('face') + '</span>Mood</button></div>' +
-      planner +
       '<button class="fab" data-act="go" data-to="#/assistant" aria-label="Open assistant chat">' + svg('chat') + '</button>' +
       tabs('cycle') + '</div>';
   }
