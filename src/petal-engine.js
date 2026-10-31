@@ -825,7 +825,9 @@
     const lines = [];
     const basis = [];
     const info = getPhaseInfo(state.cycle, todayIso, state.logs.periods);
-    lines.push('Today: ' + todayIso + '.');
+    // Weekday names for the coming days, so "on Monday" lands on the right date.
+    const weekday = (iso) => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(iso + 'T12:00:00Z').getUTCDay()];
+    lines.push('Today: ' + weekday(todayIso) + ' ' + todayIso + '. Coming days: ' + [1, 2, 3, 4, 5, 6, 7].map((n) => weekday(addDays(todayIso, n)) + ' ' + addDays(todayIso, n)).join(', ') + '.');
     if (info) {
       lines.push('Cycle day ' + info.cycleDay + ' of about ' + info.cycleLength + ', ' + info.label + ' phase (estimate from the logged period start).');
       const next = predictNextPeriod(state.cycle, state.logs.periods, new Date(todayIso + 'T12:00:00'));

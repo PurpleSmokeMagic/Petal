@@ -55,7 +55,7 @@ Trust boundaries:
 | 13 | The agent can now change and remove existing tasks and logs, and set weight and date of birth. | T, E. LLM06 Excessive agency, LLM01 | Every change is still a proposal the person approves. Ids are format checked, and the server refuses ids that are not in the shared data. Removing is only offered when asked, and the button says Remove. The date of birth stays on the phone: the agent gets the age in years, and only with diet data shared. |
 | 14 | Avatar photos. | I, T | Cropped to 256 px and re-encoded as JPEG on the phone (no EXIF), stored only in localStorage, never sent. On load only `data:image/jpeg;base64` up to 120 KB is accepted, so a URL or SVG cannot be injected; emoji and colours come from fixed lists. |
 
-Tests: `test/petal-engine.test.js` (engine, validation, setup guard, date of birth, avatar, entry changes) and `test/agent.test.js` (agent loop, both endpoints and Lens, with a scripted model). 52 passing.
+Tests: `test/petal-engine.test.js` (engine, validation, setup guard, date of birth, avatar, entry changes) and `test/agent.test.js` (agent loop, both endpoints and Lens, with a scripted model). 53 passing.
 
 ## STRIDE
 

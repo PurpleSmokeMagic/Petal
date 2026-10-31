@@ -264,3 +264,17 @@ test('a change to an entry the data does not have is refused, a real one is prop
   assert.match(seen[0].messages[0].content, /\[task task-1\] 2026-11-02 10:00 Report/);
   assert.ok(seen[0].tools.includes('remove_log'));
 });
+
+test('changes already proposed survive when the closing words fail, and weekdays are given', async () => {
+  let n = 0;
+  const llm = async ({ messages }) => {
+    n++;
+    if (n === 1) { assert.match(messages[0].content, /Today: Saturday 2026-10-31\. Coming days: Sunday 2026-11-01, Monday 2026-11-02/); return { content: '', toolCalls: [{ id: 'c1', name: 'update_profile', arguments: '{"weightKg":61}' }] }; }
+    const err = new Error('upstream 429'); err.status = 429; throw err;
+  };
+  const events = [];
+  await runAgent({ llm, mode: 'chat', today: TODAY, state: state(), messages: [{ role: 'user', content: 'I weigh 61 kg' }], onEvent: (e) => events.push(e) });
+  assert.deepEqual(events.map((e) => e.type), ['action', 'token']);
+  assert.match(events[1].text, /Tap Save/);
+  await assert.rejects(runAgent({ llm: async () => { throw new Error('down'); }, mode: 'chat', today: TODAY, state: state(), messages: [{ role: 'user', content: 'hi' }], onEvent: () => {} }));
+});

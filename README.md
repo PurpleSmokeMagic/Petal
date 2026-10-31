@@ -53,7 +53,7 @@ Requirements: Node 18+ (for tests and build) and Python 3 (or any static server)
 git clone https://github.com/PurpleSmokeMagic/Petal.git
 cd Petal
 python -m http.server 5173 --bind 127.0.0.1    # open http://127.0.0.1:5173
-node --test test/*.test.js                       # 52 tests
+node --test test/*.test.js                       # 53 tests
 node build.js                                    # writes dist/index.html, one self-contained file
 ```
 
@@ -72,7 +72,7 @@ agent/petal-agent.js     the Petal agent: instructions, setup and chat modes, to
 agent/server.js          shared request checks: origin, rate limit, date, model picking, event streaming
 api/agent.js             Vercel server function: checks requests, holds the key, runs the agent, streams events
 api/lens.js              Petal Lens: the photo agent's endpoint, strict image checks, a Groq vision model
-test/                    52 unit tests (node:test): engine, agent loop, both endpoints and Lens
+test/                    53 unit tests (node:test): engine, agent loop, both endpoints and Lens
 build.js                 inlines everything into one file and hashes scripts for the CSP
 vercel.json              Vercel build and security headers
 docs/                    engine, data model, assistant rules, entitlements, screens, roadmap

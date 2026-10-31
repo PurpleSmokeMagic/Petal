@@ -159,10 +159,18 @@ async function runAgent({ llm, mode, today, tzOffset, state, setup, messages, on
   for (let round = 0; round < LIMITS.rounds; round++) {
     const last = round === LIMITS.rounds - 1;
     let sep = wrote ? '\n\n' : '';
-    const res = await llm({
-      messages: convo, tools, toolChoice: last ? 'none' : 'auto', signal,
-      onToken: (t) => { onEvent({ type: 'token', text: sep + t }); sep = ''; wrote = true; },
-    });
+    let res;
+    try {
+      res = await llm({
+        messages: convo, tools, toolChoice: last ? 'none' : 'auto', signal,
+        onToken: (t) => { onEvent({ type: 'token', text: sep + t }); sep = ''; wrote = true; },
+      });
+    } catch (err) {
+      // Changes already sent stay useful when the closing words fail (a provider limit, say).
+      if (!actions || (signal && signal.aborted)) throw err;
+      if (!wrote) onEvent({ type: 'token', text: 'Here are the changes I suggest. Tap Save to keep them.' });
+      break;
+    }
     const calls = res.toolCalls.slice(0, LIMITS.callsPerRound);
     if (!calls.length) break;
     convo.push({ role: 'assistant', content: res.content || '', tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments || '{}' } })) });

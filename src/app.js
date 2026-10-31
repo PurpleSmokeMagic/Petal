@@ -1985,8 +1985,14 @@
       const suggested = reply.actions.map((x) => describeAction(x.name, x.args).title);
       history.push({ role: 'assistant', content: (reply.text + (suggested.length ? '\n(Suggested changes: ' + suggested.join('; ') + ')' : '')).slice(0, 2000) });
     } catch (e) {
-      history.pop(); // the agent never answered this message, so do not resend it as context
       const stopped = e && e.name === 'AbortError';
+      if (reply.actions.length && !stopped) {
+        // The changes arrived before the answer was cut off, so keep them for the person to approve.
+        if (!reply.text.trim()) reply.text = 'Here are the changes I suggest. Tap Save to keep them.';
+        history.push({ role: 'assistant', content: (reply.text + '\n(Suggested changes: ' + reply.actions.map((x) => describeAction(x.name, x.args).title).join('; ') + ')').slice(0, 2000) });
+        return;
+      }
+      history.pop(); // the agent never answered this message, so do not resend it as context
       if (stopped && reply.text) reply.text += ' …';
       else reply.error = stopped ? 'Stopped. The answer took too long or you stopped it.'
         : (e && (e.status === 429 || e.code === 'rate_limited')) ? 'The assistant is busy. Wait a minute, then try again.'
